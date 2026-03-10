@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backpropagation & Chain Rule Visualizer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #0f1117;
+  color: #e0e0e0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#input-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: #1a1d27;
+  border-bottom: 1px solid #2a2d3a;
+  flex-shrink: 0;
+}
+
+#input-bar label {
+  font-size: 14px;
+  color: #8890a0;
+  white-space: nowrap;
+}
+
+#equation-input {
+  flex: 1;
+  padding: 8px 14px;
+  font-size: 16px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  background: #0f1117;
+  color: #e0e0e0;
+  border: 1px solid #3a3d4a;
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+#equation-input:focus { border-color: #5b8def; }
+
+#build-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #5b8def;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+#build-btn:hover { background: #4a7de0; }
+
+#preset-select {
+  padding: 8px 10px;
+  font-size: 13px;
+  background: #0f1117;
+  color: #e0e0e0;
+  border: 1px solid #3a3d4a;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#error-msg {
+  display: none;
+  padding: 8px 20px;
+  background: #3a1a1a;
+  color: #ff6b6b;
+  font-size: 13px;
+  border-bottom: 1px solid #4a2a2a;
+  flex-shrink: 0;
+}
+
+#main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+#graph-container {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+#graph-svg {
+  display: block;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+#bottom-panel {
+  flex-shrink: 0;
+  background: #1a1d27;
+  border-top: 1px solid #2a2d3a;
+  padding: 14px 20px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+#slider-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  align-items: center;
+}
+
+.slider-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slider-group label {
+  font-size: 13px;
+  color: #8890a0;
+  min-width: 60px;
+  text-align: right;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+.slider-group input[type="range"] {
+  width: 140px;
+  accent-color: #5b8def;
+  cursor: pointer;
+}
+
+.slider-group .slider-val {
+  font-size: 13px;
+  color: #5b8def;
+  min-width: 50px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+#output-display {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #a0a8b8;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+/* SVG node styling */
+.node-box {
+  fill: #1e2130;
+  stroke: #3a3d4a;
+  stroke-width: 1.5;
+  rx: 8;
+  ry: 8;
+  transition: stroke 0.3s;
+}
+.node-box:hover {
+  stroke: #5b8def;
+}
+
+.node-label {
+  fill: #c0c8d8;
+  font-size: 12px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  text-anchor: middle;
+  dominant-baseline: hanging;
+  pointer-events: none;
+}
+
+.node-value {
+  fill: #5b8def;
+  font-size: 11px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  text-anchor: middle;
+  dominant-baseline: hanging;
+  pointer-events: none;
+}
+
+.node-grad {
+  fill: #e8a04f;
+  font-size: 10px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  text-anchor: middle;
+  dominant-baseline: hanging;
+  pointer-events: none;
+}
+
+.edge-line {
+  fill: none;
+  stroke: #3a3d4a;
+  stroke-width: 1.5;
+  transition: stroke 0.3s, stroke-width 0.3s;
+}
+
+.edge-arrow {
+  fill: #3a3d4a;
+  transition: fill 0.3s;
+}
+
+.edge-grad-label {
+  fill: #e8a04f;
+  font-size: 10px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* Pulse animation */
+@keyframes pulse-dot {
+  0% { opacity: 1; offset-distance: 0%; }
+  100% { opacity: 0.3; offset-distance: 100%; }
+}
+
+.pulse-circle {
+  fill: #5bef8d;
+  opacity: 0;
+}
+.pulse-circle.active {
+  animation: pulse-fade 0.5s ease-out forwards;
+}
+@keyframes pulse-fade {
+  0% { opacity: 0.9; r: 6; }
+  100% { opacity: 0; r: 12; }
+}
+
+#welcome-msg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #4a4d5a;
+  font-size: 16px;
+  line-height: 2;
+}
+#welcome-msg code {
+  background: #1a1d27;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  color: #6a6d7a;
+}
+</style>
+</head>
+<body>
+
+<div id="input-bar">
+  <label>f(x) =</label>
+  <input type="text" id="equation-input" placeholder="e.g. (theta_1 * sin(x)) ** 2 + theta_2" spellcheck="false">
+  <button id="build-btn">Build Graph</button>
+  <select id="preset-select">
+    <option value="">Presets...</option>
+    <option value="(theta_1 * sin(x)) ** 2 + theta_2">Parametric sinusoid</option>
+    <option value="theta_1 * x + theta_2">Linear</option>
+    <option value="exp(-theta_1 * x * x)">Gaussian bump</option>
+    <option value="sin(theta_1 * x) + cos(theta_2 * x)">Trig sum</option>
+    <option value="1 / (1 + exp(-theta_1 * x))">Sigmoid</option>
+    <option value="tanh(theta_1 * x + theta_2)">Tanh activation</option>
+    <option value="theta_1 * x ** 2 + theta_2 * x + theta_3">Quadratic</option>
+  </select>
+</div>
+
+<div id="error-msg"></div>
+
+<div id="main-area">
+  <div id="graph-container">
+    <svg id="graph-svg"></svg>
+    <div id="welcome-msg">
+      Enter an equation above and click <strong>Build Graph</strong><br>
+      Use parameters like <code>theta_1</code>, <code>theta_2</code>, etc.<br>
+      Variable <code>x</code> is the input
+    </div>
+  </div>
+  <div id="bottom-panel">
+    <div id="slider-panel"></div>
+    <div id="output-display"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// TOKENIZER
+// ============================================================
+const KNOWN_FUNCTIONS = new Set(['sin','cos','exp','ln','log','sqrt','abs','tanh']);
+
+function tokenize(input) {
+  const tokens = [];
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] === ' ' || input[i] === '\t') { i++; continue; }
+    // Number
+    if (/[0-9.]/.test(input[i])) {
+      let num = '';
+      while (i < input.length && /[0-9.]/.test(input[i])) { num += input[i++]; }
+      tokens.push({ type: 'NUMBER', value: parseFloat(num), pos: i });
+      continue;
+    }
+    // Identifier
+    if (/[a-zA-Z_]/.test(input[i])) {
+      let id = '';
+      while (i < input.length && /[a-zA-Z0-9_]/.test(input[i])) { id += input[i++]; }
+      tokens.push({ type: 'IDENT', value: id, pos: i });
+      continue;
+    }
+    // Two-char operator **
+    if (input[i] === '*' && i + 1 < input.length && input[i+1] === '*') {
+      tokens.push({ type: 'OP', value: '**', pos: i }); i += 2; continue;
+    }
+    // Single-char
+    const ch = input[i];
+    if ('+-*/'.includes(ch)) { tokens.push({ type: 'OP', value: ch, pos: i }); i++; continue; }
+    if (ch === '(') { tokens.push({ type: 'LPAREN', value: '(', pos: i }); i++; continue; }
+    if (ch === ')') { tokens.push({ type: 'RPAREN', value: ')', pos: i }); i++; continue; }
+    if (ch === ',') { tokens.push({ type: 'COMMA', value: ',', pos: i }); i++; continue; }
+    if (ch === '^') {
+      // Allow ^ as alias for **
+      tokens.push({ type: 'OP', value: '**', pos: i }); i++; continue;
+    }
+    throw new Error(`Unexpected character '${ch}' at position ${i}`);
+  }
+  tokens.push({ type: 'EOF', value: null, pos: i });
+  return tokens;
+}
+
+// ============================================================
+// RECURSIVE DESCENT PARSER
+// ============================================================
+let nextNodeId = 0;
+
+function parse(tokens) {
+  let pos = 0;
+  function peek() { return tokens[pos]; }
+  function consume(type, value) {
+    const t = tokens[pos];
+    if (type && t.type !== type) throw new Error(`Expected ${type} but got ${t.type} at pos ${t.pos}`);
+    if (value !== undefined && t.value !== value) throw new Error(`Expected '${value}' but got '${t.value}' at pos ${t.pos}`);
+    pos++;
+    return t;
+  }
+
+  function parseExpr() {
+    let left = parseTerm();
+    while (peek().type === 'OP' && (peek().value === '+' || peek().value === '-')) {
+      const op = consume('OP').value;
+      const right = parseTerm();
+      left = { type: 'binop', op, children: [left, right], id: nextNodeId++ };
+    }
+    return left;
+  }
+
+  function parseTerm() {
+    let left = parsePower();
+    while (peek().type === 'OP' && (peek().value === '*' || peek().value === '/')) {
+      const op = consume('OP').value;
+      const right = parsePower();
+      left = { type: 'binop', op, children: [left, right], id: nextNodeId++ };
+    }
+    return left;
+  }
+
+  function parsePower() {
+    let base = parseUnary();
+    if (peek().type === 'OP' && peek().value === '**') {
+      consume('OP');
+      const exp = parsePower(); // right-associative
+      base = { type: 'binop', op: '**', children: [base, exp], id: nextNodeId++ };
+    }
+    return base;
+  }
+
+  function parseUnary() {
+    if (peek().type === 'OP' && peek().value === '-') {
+      consume('OP');
+      const operand = parseUnary();
+      return { type: 'unaryop', op: 'neg', children: [operand], id: nextNodeId++ };
+    }
+    return parseAtom();
+  }
+
+  function parseAtom() {
+    const t = peek();
+    if (t.type === 'NUMBER') {
+      consume('NUMBER');
+      return { type: 'literal', value: t.value, id: nextNodeId++ };
+    }
+    if (t.type === 'IDENT') {
+      consume('IDENT');
+      const name = t.value;
+      // Function call?
+      if (peek().type === 'LPAREN' && KNOWN_FUNCTIONS.has(name)) {
+        consume('LPAREN');
+        const args = [parseExpr()];
+        while (peek().type === 'COMMA') { consume('COMMA'); args.push(parseExpr()); }
+        consume('RPAREN');
+        return { type: 'funcall', op: name, children: args, id: nextNodeId++ };
+      }
+      // Variable or parameter
+      if (name === 'x') {
+        return { type: 'variable', name: 'x', id: nextNodeId++ };
+      }
+      return { type: 'param', name, id: nextNodeId++ };
+    }
+    if (t.type === 'LPAREN') {
+      consume('LPAREN');
+      const expr = parseExpr();
+      consume('RPAREN');
+      return expr;
+    }
+    throw new Error(`Unexpected token '${t.value}' at position ${t.pos}`);
+  }
+
+  const ast = parseExpr();
+  if (peek().type !== 'EOF') throw new Error(`Unexpected token '${peek().value}' at position ${peek().pos}`);
+  return ast;
+}
+
+// ============================================================
+// AST → COMPUTATION GRAPH
+// ============================================================
+function astToGraph(ast) {
+  const nodes = new Map(); // id -> node
+  const nameToId = new Map(); // for deduplicating variables/params
+  const paramNames = new Set();
+  let outputId = null;
+
+  function walk(astNode) {
+    // Deduplicate variables and params
+    if (astNode.type === 'variable' || astNode.type === 'param') {
+      if (nameToId.has(astNode.name)) {
+        return nameToId.get(astNode.name);
+      }
+      const node = {
+        id: astNode.id,
+        type: astNode.type === 'variable' ? 'input' : 'param',
+        op: null,
+        label: astNode.name,
+        inputIds: [],
+        outputIds: [],
+        value: 0,
+        grad: 0,
+        localGrads: []
+      };
+      if (astNode.type === 'param') paramNames.add(astNode.name);
+      nodes.set(node.id, node);
+      nameToId.set(astNode.name, node.id);
+      return node.id;
+    }
+
+    if (astNode.type === 'literal') {
+      const node = {
+        id: astNode.id,
+        type: 'const',
+        op: null,
+        label: String(astNode.value),
+        inputIds: [],
+        outputIds: [],
+        value: astNode.value,
+        grad: 0,
+        localGrads: []
+      };
+      nodes.set(node.id, node);
+      return node.id;
+    }
+
+    // Operation nodes
+    const childIds = astNode.children.map(c => walk(c));
+
+    let label;
+    if (astNode.type === 'binop') label = astNode.op;
+    else if (astNode.type === 'unaryop') label = '-()';
+    else label = astNode.op + '()';
+
+    const node = {
+      id: astNode.id,
+      type: 'op',
+      op: astNode.type === 'unaryop' ? 'neg' : astNode.op,
+      label,
+      inputIds: childIds,
+      outputIds: [],
+      value: 0,
+      grad: 0,
+      localGrads: []
+    };
+    nodes.set(node.id, node);
+
+    // Register as output of children
+    for (const cid of childIds) {
+      nodes.get(cid).outputIds.push(node.id);
+    }
+
+    return node.id;
+  }
+
+  outputId = walk(ast);
+
+  // Topological sort
+  const visited = new Set();
+  const topoOrder = [];
+  function dfs(id) {
+    if (visited.has(id)) return;
+    visited.add(id);
+    const n = nodes.get(id);
+    for (const iid of n.inputIds) dfs(iid);
+    topoOrder.push(id);
+  }
+  dfs(outputId);
+
+  // Collect params in order
+  const params = new Map();
+  const sortedParamNames = [...paramNames].sort();
+  for (const name of sortedParamNames) {
+    const nid = nameToId.get(name);
+    params.set(name, { nodeId: nid, value: 1.0 });
+  }
+
+  return { nodes, topoOrder, reverseTopoOrder: [...topoOrder].reverse(), params, outputId, nameToId };
+}
+
+// ============================================================
+// FORWARD PASS
+// ============================================================
+function forwardPass(graph) {
+  for (const id of graph.topoOrder) {
+    const node = graph.nodes.get(id);
+    if (node.type === 'input' || node.type === 'param' || node.type === 'const') continue;
+
+    const inputs = node.inputIds.map(iid => graph.nodes.get(iid).value);
+    const a = inputs[0];
+    const b = inputs.length > 1 ? inputs[1] : undefined;
+
+    switch (node.op) {
+      case '+': node.value = a + b; break;
+      case '-': node.value = a - b; break;
+      case '*': node.value = a * b; break;
+      case '/': node.value = a / b; break;
+      case '**': node.value = Math.pow(a, b); break;
+      case 'neg': node.value = -a; break;
+      case 'sin': node.value = Math.sin(a); break;
+      case 'cos': node.value = Math.cos(a); break;
+      case 'exp': node.value = Math.exp(a); break;
+      case 'ln': case 'log': node.value = Math.log(a); break;
+      case 'sqrt': node.value = Math.sqrt(a); break;
+      case 'abs': node.value = Math.abs(a); break;
+      case 'tanh': node.value = Math.tanh(a); break;
+    }
+  }
+}
+
+// ============================================================
+// BACKWARD PASS (Reverse-mode autodiff)
+// ============================================================
+function backwardPass(graph) {
+  // Reset gradients
+  for (const [, node] of graph.nodes) {
+    node.grad = 0;
+    node.localGrads = [];
+  }
+
+  // Seed output gradient
+  graph.nodes.get(graph.outputId).grad = 1.0;
+
+  for (const id of graph.reverseTopoOrder) {
+    const node = graph.nodes.get(id);
+    if (node.type !== 'op') continue;
+
+    const inputs = node.inputIds.map(iid => graph.nodes.get(iid).value);
+    const a = inputs[0];
+    const b = inputs.length > 1 ? inputs[1] : undefined;
+
+    let da, db;
+    switch (node.op) {
+      case '+': da = 1; db = 1; break;
+      case '-': da = 1; db = -1; break;
+      case '*': da = b; db = a; break;
+      case '/': da = 1/b; db = -a/(b*b); break;
+      case '**': da = b * Math.pow(a, b-1); db = Math.pow(a, b) * Math.log(a); break;
+      case 'neg': da = -1; break;
+      case 'sin': da = Math.cos(a); break;
+      case 'cos': da = -Math.sin(a); break;
+      case 'exp': da = Math.exp(a); break;
+      case 'ln': case 'log': da = 1/a; break;
+      case 'sqrt': da = 1/(2*Math.sqrt(a)); break;
+      case 'abs': da = a >= 0 ? 1 : -1; break;
+      case 'tanh': { const t = Math.tanh(a); da = 1 - t*t; break; }
+    }
+
+    node.localGrads = [da];
+    if (db !== undefined) node.localGrads.push(db);
+
+    // Propagate
+    graph.nodes.get(node.inputIds[0]).grad += node.grad * da;
+    if (node.inputIds.length > 1 && db !== undefined) {
+      graph.nodes.get(node.inputIds[1]).grad += node.grad * db;
+    }
+  }
+}
+
+// ============================================================
+// GRAPH LAYOUT (Sugiyama-style, left-to-right)
+// ============================================================
+const NODE_W = 160;
+const NODE_H = 140;
+const LAYER_GAP = 80;
+const NODE_GAP = 30;
+
+function layoutGraph(graph) {
+  // Assign layers
+  const layers = new Map();
+  for (const id of graph.topoOrder) {
+    const node = graph.nodes.get(id);
+    if (node.inputIds.length === 0) {
+      layers.set(id, 0);
+    } else {
+      layers.set(id, 1 + Math.max(...node.inputIds.map(iid => layers.get(iid))));
+    }
+  }
+
+  // Group by layer
+  const maxLayer = Math.max(...layers.values());
+  const layerGroups = Array.from({ length: maxLayer + 1 }, () => []);
+  for (const [id, layer] of layers) {
+    layerGroups[layer].push(id);
+  }
+
+  // Barycenter ordering (2 passes)
+  for (let iter = 0; iter < 3; iter++) {
+    for (let l = 1; l <= maxLayer; l++) {
+      layerGroups[l].sort((a, b) => {
+        const aInputs = graph.nodes.get(a).inputIds;
+        const bInputs = graph.nodes.get(b).inputIds;
+        const aCenter = aInputs.length ? aInputs.reduce((s, id) => s + layerGroups[layers.get(id)].indexOf(id), 0) / aInputs.length : 0;
+        const bCenter = bInputs.length ? bInputs.reduce((s, id) => s + layerGroups[layers.get(id)].indexOf(id), 0) / bInputs.length : 0;
+        return aCenter - bCenter;
+      });
+    }
+  }
+
+  // Assign coordinates
+  for (let l = 0; l <= maxLayer; l++) {
+    const group = layerGroups[l];
+    const totalHeight = group.length * NODE_H + (group.length - 1) * NODE_GAP;
+    let y = -totalHeight / 2;
+    for (const id of group) {
+      const node = graph.nodes.get(id);
+      node.x = l * (NODE_W + LAYER_GAP);
+      node.y = y;
+      node.layer = l;
+      y += NODE_H + NODE_GAP;
+    }
+  }
+
+  return { maxLayer, layerGroups };
+}
+
+// ============================================================
+// MINI-PLOT DRAWING
+// ============================================================
+function drawMiniPlot(canvas, graph, nodeId) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const node = graph.nodes.get(nodeId);
+  if (node.type !== 'op') return;
+
+  // We plot the function of the first input, holding others constant
+  const primaryInputId = node.inputIds[0];
+  const primaryVal = graph.nodes.get(primaryInputId).value;
+
+  // Sample range around operating point
+  const range = 4;
+  const xMin = primaryVal - range;
+  const xMax = primaryVal + range;
+  const numSamples = 80;
+
+  const savedValues = node.inputIds.map(iid => graph.nodes.get(iid).value);
+
+  // Sample the function
+  const points = [];
+  for (let i = 0; i <= numSamples; i++) {
+    const xv = xMin + (xMax - xMin) * (i / numSamples);
+    graph.nodes.get(primaryInputId).value = xv;
+    // Evaluate just this node
+    const inputs = node.inputIds.map(iid => graph.nodes.get(iid).value);
+    const a = inputs[0], b = inputs.length > 1 ? inputs[1] : undefined;
+    let yv;
+    switch (node.op) {
+      case '+': yv = a + b; break;
+      case '-': yv = a - b; break;
+      case '*': yv = a * b; break;
+      case '/': yv = b !== 0 ? a / b : NaN; break;
+      case '**': yv = Math.pow(a, b); break;
+      case 'neg': yv = -a; break;
+      case 'sin': yv = Math.sin(a); break;
+      case 'cos': yv = Math.cos(a); break;
+      case 'exp': yv = Math.exp(a); break;
+      case 'ln': case 'log': yv = a > 0 ? Math.log(a) : NaN; break;
+      case 'sqrt': yv = a >= 0 ? Math.sqrt(a) : NaN; break;
+      case 'abs': yv = Math.abs(a); break;
+      case 'tanh': yv = Math.tanh(a); break;
+      default: yv = NaN;
+    }
+    points.push({ x: xv, y: yv });
+  }
+
+  // Restore values
+  node.inputIds.forEach((iid, idx) => { graph.nodes.get(iid).value = savedValues[idx]; });
+
+  // Find y range
+  const validPoints = points.filter(p => isFinite(p.y));
+  if (validPoints.length === 0) return;
+  let yMin = Math.min(...validPoints.map(p => p.y));
+  let yMax = Math.max(...validPoints.map(p => p.y));
+  if (yMax - yMin < 0.01) { yMin -= 1; yMax += 1; }
+  const yPad = (yMax - yMin) * 0.15;
+  yMin -= yPad; yMax += yPad;
+
+  // Coordinate transforms
+  const px = (xv) => (xv - xMin) / (xMax - xMin) * w;
+  const py = (yv) => h - (yv - yMin) / (yMax - yMin) * h;
+
+  // Draw axes (faint)
+  ctx.strokeStyle = '#2a2d3a';
+  ctx.lineWidth = 0.5;
+  if (yMin <= 0 && yMax >= 0) {
+    const y0 = py(0);
+    ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(w, y0); ctx.stroke();
+  }
+  if (xMin <= 0 && xMax >= 0) {
+    const x0 = px(0);
+    ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke();
+  }
+
+  // Draw function curve
+  ctx.strokeStyle = '#5b8def';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  let started = false;
+  for (const p of points) {
+    if (!isFinite(p.y)) { started = false; continue; }
+    const sx = px(p.x), sy = py(p.y);
+    if (sy < -50 || sy > h + 50) { started = false; continue; }
+    if (!started) { ctx.moveTo(sx, sy); started = true; }
+    else ctx.lineTo(sx, sy);
+  }
+  ctx.stroke();
+
+  // Operating point
+  const opX = primaryVal;
+  const opY = node.value;
+  if (isFinite(opY)) {
+    const sx = px(opX), sy = py(opY);
+
+    // Tangent line
+    const slope = node.localGrads[0] || 0;
+    const tangentLen = range * 0.6;
+    ctx.strokeStyle = '#e8a04f';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    const tx1 = opX - tangentLen, ty1 = opY - slope * tangentLen;
+    const tx2 = opX + tangentLen, ty2 = opY + slope * tangentLen;
+    ctx.moveTo(px(tx1), py(ty1));
+    ctx.lineTo(px(tx2), py(ty2));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Dot
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ============================================================
+// SVG RENDERING
+// ============================================================
+let currentGraph = null;
+let canvasElements = new Map();
+
+function renderGraph(graph) {
+  const svg = document.getElementById('graph-svg');
+  svg.innerHTML = '';
+  canvasElements.clear();
+
+  const welcome = document.getElementById('welcome-msg');
+  if (welcome) welcome.style.display = 'none';
+
+  const { maxLayer, layerGroups } = layoutGraph(graph);
+
+  // Compute SVG bounds
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [, node] of graph.nodes) {
+    minX = Math.min(minX, node.x);
+    maxX = Math.max(maxX, node.x + NODE_W);
+    minY = Math.min(minY, node.y);
+    maxY = Math.max(maxY, node.y + NODE_H);
+  }
+  const pad = 50;
+  svg.setAttribute('viewBox', `${minX - pad} ${minY - pad} ${maxX - minX + 2*pad} ${maxY - minY + 2*pad}`);
+  svg.style.width = `${maxX - minX + 2*pad}px`;
+  svg.style.height = `${maxY - minY + 2*pad}px`;
+
+  // Arrowhead marker
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', 'arrowhead');
+  marker.setAttribute('markerWidth', '8');
+  marker.setAttribute('markerHeight', '6');
+  marker.setAttribute('refX', '8');
+  marker.setAttribute('refY', '3');
+  marker.setAttribute('orient', 'auto');
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  poly.setAttribute('points', '0 0, 8 3, 0 6');
+  poly.setAttribute('class', 'edge-arrow');
+  marker.appendChild(poly);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  // Draw edges first (behind nodes)
+  const edgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  for (const [, node] of graph.nodes) {
+    if (node.type !== 'op') continue;
+    for (let i = 0; i < node.inputIds.length; i++) {
+      const srcNode = graph.nodes.get(node.inputIds[i]);
+      const x1 = srcNode.x + NODE_W;
+      const y1 = srcNode.y + NODE_H / 2;
+      const x2 = node.x;
+      const y2 = node.y + NODE_H / 2;
+
+      const dx = x2 - x1;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M${x1},${y1} C${x1 + dx*0.5},${y1} ${x2 - dx*0.5},${y2} ${x2},${y2}`);
+      path.setAttribute('class', 'edge-line');
+      path.setAttribute('marker-end', 'url(#arrowhead)');
+      path.dataset.srcId = srcNode.id;
+      path.dataset.dstId = node.id;
+      path.dataset.inputIdx = i;
+      edgeGroup.appendChild(path);
+
+      // Gradient label on edge
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2 - 8;
+      const gradLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      gradLabel.setAttribute('x', mx);
+      gradLabel.setAttribute('y', my);
+      gradLabel.setAttribute('class', 'edge-grad-label');
+      gradLabel.dataset.srcId = srcNode.id;
+      gradLabel.dataset.dstId = node.id;
+      gradLabel.dataset.inputIdx = i;
+      gradLabel.textContent = '';
+      edgeGroup.appendChild(gradLabel);
+    }
+  }
+  svg.appendChild(edgeGroup);
+
+  // Draw nodes
+  const nodeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  for (const [, node] of graph.nodes) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+    g.dataset.nodeId = node.id;
+
+    // Background rect
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', NODE_W);
+    rect.setAttribute('height', NODE_H);
+    rect.setAttribute('class', 'node-box');
+    g.appendChild(rect);
+
+    // Label
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', NODE_W / 2);
+    label.setAttribute('y', 6);
+    label.setAttribute('class', 'node-label');
+    label.textContent = node.label;
+    g.appendChild(label);
+
+    // Value
+    const valText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    valText.setAttribute('x', NODE_W / 2);
+    valText.setAttribute('y', NODE_H - 26);
+    valText.setAttribute('class', 'node-value');
+    valText.dataset.nodeId = node.id;
+    valText.dataset.role = 'value';
+    g.appendChild(valText);
+
+    // Gradient
+    const gradText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    gradText.setAttribute('x', NODE_W / 2);
+    gradText.setAttribute('y', NODE_H - 12);
+    gradText.setAttribute('class', 'node-grad');
+    gradText.dataset.nodeId = node.id;
+    gradText.dataset.role = 'grad';
+    g.appendChild(gradText);
+
+    // Mini-plot canvas (for op nodes)
+    if (node.type === 'op') {
+      const fo = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+      fo.setAttribute('x', 8);
+      fo.setAttribute('y', 22);
+      fo.setAttribute('width', NODE_W - 16);
+      fo.setAttribute('height', NODE_H - 60);
+      const canvas = document.createElement('canvas');
+      canvas.width = (NODE_W - 16) * 2; // 2x for retina
+      canvas.height = (NODE_H - 60) * 2;
+      canvas.style.width = (NODE_W - 16) + 'px';
+      canvas.style.height = (NODE_H - 60) + 'px';
+      canvas.style.borderRadius = '4px';
+      canvas.style.background = '#13151f';
+      fo.appendChild(canvas);
+      g.appendChild(fo);
+      canvasElements.set(node.id, canvas);
+    }
+
+    nodeGroup.appendChild(g);
+  }
+  svg.appendChild(nodeGroup);
+
+  updateValues(graph);
+}
+
+function fmt(v) {
+  if (!isFinite(v)) return 'NaN';
+  if (Math.abs(v) < 0.001 && v !== 0) return v.toExponential(2);
+  return v.toFixed(3);
+}
+
+function updateValues(graph) {
+  forwardPass(graph);
+  backwardPass(graph);
+
+  // Update node value/grad labels
+  const svg = document.getElementById('graph-svg');
+  svg.querySelectorAll('text[data-role="value"]').forEach(el => {
+    const node = graph.nodes.get(parseInt(el.dataset.nodeId));
+    el.textContent = `val = ${fmt(node.value)}`;
+  });
+  svg.querySelectorAll('text[data-role="grad"]').forEach(el => {
+    const node = graph.nodes.get(parseInt(el.dataset.nodeId));
+    el.textContent = `grad = ${fmt(node.grad)}`;
+  });
+
+  // Update edge gradient labels + styling
+  svg.querySelectorAll('.edge-line').forEach(path => {
+    const dstNode = graph.nodes.get(parseInt(path.dataset.dstId));
+    const idx = parseInt(path.dataset.inputIdx);
+    const localGrad = dstNode.localGrads[idx];
+    if (localGrad !== undefined) {
+      const mag = Math.min(Math.abs(localGrad * dstNode.grad), 5);
+      const intensity = Math.min(mag / 2, 1);
+      const r = Math.round(91 + intensity * 140);
+      const g = Math.round(141 - intensity * 50);
+      const b = Math.round(239 - intensity * 100);
+      path.style.stroke = `rgb(${r},${g},${b})`;
+      path.style.strokeWidth = 1.5 + intensity * 2.5;
+    }
+  });
+  svg.querySelectorAll('.edge-grad-label').forEach(el => {
+    const dstNode = graph.nodes.get(parseInt(el.dataset.dstId));
+    const idx = parseInt(el.dataset.inputIdx);
+    const localGrad = dstNode.localGrads[idx];
+    if (localGrad !== undefined) {
+      el.textContent = `×${fmt(localGrad)}`;
+    }
+  });
+
+  // Update mini-plots
+  for (const [nodeId, canvas] of canvasElements) {
+    drawMiniPlot(canvas, graph, nodeId);
+  }
+
+  // Update output display
+  const outNode = graph.nodes.get(graph.outputId);
+  let gradSummary = [];
+  for (const [name, info] of graph.params) {
+    const pNode = graph.nodes.get(info.nodeId);
+    gradSummary.push(`∂f/∂${name} = ${fmt(pNode.grad)}`);
+  }
+  const xNode = graph.nodes.get(graph.nameToId.get('x'));
+  if (xNode) gradSummary.push(`∂f/∂x = ${fmt(xNode.grad)}`);
+
+  document.getElementById('output-display').textContent =
+    `f(x) = ${fmt(outNode.value)}    |    ${gradSummary.join('    ')}`;
+}
+
+// ============================================================
+// SLIDER GENERATION + INTERACTION
+// ============================================================
+function buildSliders(graph) {
+  const panel = document.getElementById('slider-panel');
+  panel.innerHTML = '';
+
+  // x slider
+  if (graph.nameToId.has('x')) {
+    panel.appendChild(makeSlider('x', 1.0, graph));
+  }
+
+  // param sliders
+  for (const [name, info] of graph.params) {
+    panel.appendChild(makeSlider(name, info.value, graph));
+  }
+}
+
+function makeSlider(name, initialValue, graph) {
+  const div = document.createElement('div');
+  div.className = 'slider-group';
+
+  const label = document.createElement('label');
+  label.textContent = name;
+  div.appendChild(label);
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = -5;
+  input.max = 5;
+  input.step = 0.01;
+  input.value = initialValue;
+  div.appendChild(input);
+
+  const valSpan = document.createElement('span');
+  valSpan.className = 'slider-val';
+  valSpan.textContent = parseFloat(initialValue).toFixed(2);
+  div.appendChild(valSpan);
+
+  let rafId = null;
+  input.addEventListener('input', () => {
+    const v = parseFloat(input.value);
+    valSpan.textContent = v.toFixed(2);
+
+    if (name === 'x') {
+      graph.nodes.get(graph.nameToId.get('x')).value = v;
+    } else {
+      graph.params.get(name).value = v;
+      graph.nodes.get(graph.params.get(name).nodeId).value = v;
+    }
+
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      updateValues(graph);
+      rafId = null;
+    });
+  });
+
+  return div;
+}
+
+// ============================================================
+// MAIN WIRING
+// ============================================================
+function buildGraph() {
+  const eqInput = document.getElementById('equation-input');
+  const errorMsg = document.getElementById('error-msg');
+  errorMsg.style.display = 'none';
+
+  const text = eqInput.value.trim();
+  if (!text) return;
+
+  try {
+    nextNodeId = 0;
+    const tokens = tokenize(text);
+    const ast = parse(tokens);
+    const graph = astToGraph(ast);
+
+    // Set initial param values
+    for (const [, info] of graph.params) {
+      graph.nodes.get(info.nodeId).value = info.value;
+    }
+    // Set initial x value
+    if (graph.nameToId.has('x')) {
+      graph.nodes.get(graph.nameToId.get('x')).value = 1.0;
+    }
+
+    currentGraph = graph;
+    renderGraph(graph);
+    buildSliders(graph);
+  } catch (e) {
+    errorMsg.textContent = 'Parse error: ' + e.message;
+    errorMsg.style.display = 'block';
+  }
+}
+
+document.getElementById('build-btn').addEventListener('click', buildGraph);
+document.getElementById('equation-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') buildGraph();
+});
+
+document.getElementById('preset-select').addEventListener('change', (e) => {
+  if (e.target.value) {
+    document.getElementById('equation-input').value = e.target.value;
+    buildGraph();
+    e.target.value = '';
+  }
+});
+</script>
+</body>
+</html>
