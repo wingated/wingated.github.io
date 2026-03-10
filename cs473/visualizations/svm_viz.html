@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SVM Linear Classifier Visualization</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin-bottom: 4px;
+    color: #fff;
+  }
+  .subtitle {
+    font-size: 0.9rem;
+    color: #aaa;
+    margin-bottom: 16px;
+  }
+  .container {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .panel-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #ccc;
+  }
+  canvas { border-radius: 6px; }
+  #canvas2d { cursor: default; background: #111; }
+  #canvas3d { background: #111; border-radius: 6px; }
+  .controls {
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  label { font-size: 0.85rem; color: #bbb; }
+  input[type=range] { width: 140px; accent-color: #7c7cff; }
+  .value-display {
+    font-size: 0.8rem;
+    color: #999;
+    min-width: 50px;
+    text-align: left;
+  }
+  .instructions {
+    margin-top: 12px;
+    font-size: 0.8rem;
+    color: #777;
+    text-align: center;
+    max-width: 700px;
+  }
+  .math {
+    font-family: 'Times New Roman', serif;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<h1>Linear Classifier: <span class="math">f</span>(<span class="math">x</span>) = <span class="math">w</span><sup>T</sup><span class="math">x</span> + <span class="math">w</span><sub>0</sub></h1>
+<p class="subtitle">Interactive visualization of the decision function and boundary</p>
+
+<div class="container">
+  <div class="panel">
+    <div class="panel-title">2D Decision Function (color = <span class="math">f</span>(<span class="math">x</span>))</div>
+    <canvas id="canvas2d" width="500" height="500"></canvas>
+  </div>
+  <div class="panel">
+    <div class="panel-title">3D Decision Function Surface</div>
+    <canvas id="canvas3d" width="500" height="500"></canvas>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Bias <span class="math">w</span><sub>0</sub>:</label>
+    <input type="range" id="biasSlider" min="-3" max="3" step="0.05" value="0">
+    <span class="value-display" id="biasValue">0.00</span>
+  </div>
+</div>
+
+<p class="instructions">
+  Drag the <strong>w</strong> arrow tip on the left plot to change the weight vector.
+  Use the slider to adjust the bias. Rotate the 3D plot by dragging.
+</p>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── State ──
+let w = [1.0, 0.8];
+let w0 = 0.0;
+const RANGE = 4; // coordinate range [-RANGE, RANGE]
+
+// ── 2D Canvas ──
+const c2d = document.getElementById('canvas2d');
+const ctx = c2d.getContext('2d');
+const W = c2d.width, H = c2d.height;
+const PAD = 40; // padding for axes
+const plotW = W - PAD * 2, plotH = H - PAD * 2;
+
+function toPixel(x, y) {
+  return [
+    PAD + (x + RANGE) / (2 * RANGE) * plotW,
+    PAD + (RANGE - y) / (2 * RANGE) * plotH
+  ];
+}
+function fromPixel(px, py) {
+  return [
+    (px - PAD) / plotW * (2 * RANGE) - RANGE,
+    RANGE - (py - PAD) / plotH * (2 * RANGE)
+  ];
+}
+
+// Diverging colormap: blue (negative) — white (zero) — red (positive)
+function colormap(t) {
+  // t in [-1, 1]
+  t = Math.max(-1, Math.min(1, t));
+  let r, g, b;
+  if (t >= 0) {
+    // white to red
+    r = 255;
+    g = Math.round(255 * (1 - t));
+    b = Math.round(255 * (1 - t));
+  } else {
+    // white to blue
+    const s = -t;
+    r = Math.round(255 * (1 - s));
+    g = Math.round(255 * (1 - s));
+    b = 255;
+  }
+  return [r, g, b];
+}
+
+function draw2D() {
+  // Compute max |f| for symmetric color normalization
+  const corners = [
+    [-RANGE, -RANGE], [-RANGE, RANGE], [RANGE, -RANGE], [RANGE, RANGE]
+  ];
+  let maxF = 0.01;
+  for (const [cx, cy] of corners) {
+    maxF = Math.max(maxF, Math.abs(w[0] * cx + w[1] * cy + w0));
+  }
+
+  // Draw heatmap
+  const imgData = ctx.createImageData(plotW, plotH);
+  for (let py = 0; py < plotH; py++) {
+    for (let px = 0; px < plotW; px++) {
+      const x1 = px / plotW * (2 * RANGE) - RANGE;
+      const x2 = RANGE - py / plotH * (2 * RANGE);
+      const f = w[0] * x1 + w[1] * x2 + w0;
+      const t = f / maxF;
+      const [r, g, b] = colormap(t);
+      const idx = (py * plotW + px) * 4;
+      imgData.data[idx] = r;
+      imgData.data[idx + 1] = g;
+      imgData.data[idx + 2] = b;
+      imgData.data[idx + 3] = 255;
+    }
+  }
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+  ctx.putImageData(imgData, PAD, PAD);
+
+  // Axes
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(PAD, PAD, plotW, plotH);
+
+  // Tick marks and labels
+  ctx.fillStyle = '#888';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let v = -RANGE; v <= RANGE; v += 2) {
+    const [px] = toPixel(v, 0);
+    ctx.fillText(v.toString(), px, H - PAD + 4);
+  }
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let v = -RANGE; v <= RANGE; v += 2) {
+    const [, py] = toPixel(0, v);
+    ctx.fillText(v.toString(), PAD - 4, py);
+  }
+
+  // Axis labels
+  ctx.fillStyle = '#aaa';
+  ctx.font = 'italic 13px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('x\u2081', W / 2, H - 14);
+  ctx.save();
+  ctx.translate(12, H / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('x\u2082', 0, 0);
+  ctx.restore();
+
+  // Decision boundary (dashed line)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(PAD, PAD, plotW, plotH);
+  ctx.clip();
+
+  ctx.setLineDash([8, 5]);
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2.5;
+  // w1*x1 + w2*x2 + w0 = 0
+  // Find two boundary points within the plot
+  const bPoints = [];
+  if (Math.abs(w[1]) > 1e-8) {
+    for (const x1 of [-RANGE, RANGE]) {
+      const x2 = -(w[0] * x1 + w0) / w[1];
+      bPoints.push([x1, x2]);
+    }
+  }
+  if (Math.abs(w[0]) > 1e-8) {
+    for (const x2 of [-RANGE, RANGE]) {
+      const x1 = -(w[1] * x2 + w0) / w[0];
+      bPoints.push([x1, x2]);
+    }
+  }
+  if (bPoints.length >= 2) {
+    const [p0x, p0y] = toPixel(bPoints[0][0], bPoints[0][1]);
+    const [p1x, p1y] = toPixel(bPoints[1][0], bPoints[1][1]);
+    ctx.beginPath();
+    ctx.moveTo(p0x, p0y);
+    ctx.lineTo(p1x, p1y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Draw w vector as arrow from origin
+  const [ox, oy] = toPixel(0, 0);
+  const [wx, wy] = toPixel(w[0], w[1]);
+
+  ctx.strokeStyle = '#ffdd44';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(ox, oy);
+  ctx.lineTo(wx, wy);
+  ctx.stroke();
+
+  // Arrowhead
+  const angle = Math.atan2(wy - oy, wx - ox);
+  const aLen = 12;
+  ctx.fillStyle = '#ffdd44';
+  ctx.beginPath();
+  ctx.moveTo(wx, wy);
+  ctx.lineTo(wx - aLen * Math.cos(angle - 0.35), wy - aLen * Math.sin(angle - 0.35));
+  ctx.lineTo(wx - aLen * Math.cos(angle + 0.35), wy - aLen * Math.sin(angle + 0.35));
+  ctx.closePath();
+  ctx.fill();
+
+  // Drag handle
+  ctx.fillStyle = 'rgba(255, 221, 68, 0.3)';
+  ctx.strokeStyle = '#ffdd44';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(wx, wy, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Label
+  ctx.fillStyle = '#ffdd44';
+  ctx.font = 'bold italic 14px serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('w', wx + 14, wy - 6);
+
+  ctx.restore();
+}
+
+// ── Drag interaction ──
+let dragging = false;
+
+c2d.addEventListener('mousedown', (e) => {
+  const rect = c2d.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top) * (H / rect.height);
+  const [wx, wy] = toPixel(w[0], w[1]);
+  const dist = Math.hypot(mx - wx, my - wy);
+  if (dist < 20) {
+    dragging = true;
+    c2d.style.cursor = 'grabbing';
+  }
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) {
+    // Update cursor
+    const rect = c2d.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (W / rect.width);
+    const my = (e.clientY - rect.top) * (H / rect.height);
+    const [wx, wy] = toPixel(w[0], w[1]);
+    const dist = Math.hypot(mx - wx, my - wy);
+    c2d.style.cursor = dist < 20 ? 'grab' : 'default';
+    return;
+  }
+  const rect = c2d.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top) * (H / rect.height);
+  const [x1, x2] = fromPixel(mx, my);
+  w[0] = Math.max(-RANGE, Math.min(RANGE, x1));
+  w[1] = Math.max(-RANGE, Math.min(RANGE, x2));
+  update();
+});
+
+window.addEventListener('mouseup', () => {
+  if (dragging) {
+    dragging = false;
+    c2d.style.cursor = 'default';
+  }
+});
+
+// ── 3D Scene ──
+const canvas3d = document.getElementById('canvas3d');
+const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+renderer.setSize(500, 500);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x111111);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(8, 6, 8);
+camera.lookAt(0, 0, 0);
+
+const controls = new OrbitControls(camera, canvas3d);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+// Ambient + directional light
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+dirLight.position.set(5, 10, 5);
+scene.add(dirLight);
+
+// Reference plane at z=0 (translucent gray)
+const refGeo = new THREE.PlaneGeometry(2 * RANGE, 2 * RANGE);
+const refMat = new THREE.MeshBasicMaterial({
+  color: 0x888888, transparent: true, opacity: 0.15, side: THREE.DoubleSide
+});
+const refPlane = new THREE.Mesh(refGeo, refMat);
+refPlane.rotation.x = -Math.PI / 2;
+scene.add(refPlane);
+
+// Grid on z=0 plane
+const gridHelper = new THREE.GridHelper(2 * RANGE, 8, 0x444444, 0x333333);
+scene.add(gridHelper);
+
+// Axes
+function makeAxis(from, to, color) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(...from), new THREE.Vector3(...to)
+  ]);
+  const mat = new THREE.LineBasicMaterial({ color });
+  return new THREE.Line(geo, mat);
+}
+scene.add(makeAxis([-RANGE, 0, 0], [RANGE, 0, 0], 0xff6666)); // x1 — red
+scene.add(makeAxis([0, 0, -RANGE], [0, 0, RANGE], 0x6666ff)); // x2 — blue
+scene.add(makeAxis([0, -RANGE, 0], [0, RANGE, 0], 0x66ff66)); // f(x) — green
+
+// Axis labels using sprites
+function makeLabel(text, position, color = '#aaa') {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 64;
+  const ctx2 = canvas.getContext('2d');
+  ctx2.fillStyle = color;
+  ctx2.font = 'italic 36px serif';
+  ctx2.textAlign = 'center';
+  ctx2.textBaseline = 'middle';
+  ctx2.fillText(text, 64, 32);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(...position);
+  sprite.scale.set(1.5, 0.75, 1);
+  return sprite;
+}
+scene.add(makeLabel('x\u2081', [RANGE + 0.5, 0, 0], '#ff8888'));
+scene.add(makeLabel('x\u2082', [0, 0, RANGE + 0.5], '#8888ff'));
+scene.add(makeLabel('f(x)', [0, RANGE + 0.5, 0], '#88ff88'));
+
+// f(x) surface — we'll build a mesh from a grid of vertices
+const GRID = 40;
+const surfGeo = new THREE.BufferGeometry();
+const surfVertices = new Float32Array((GRID + 1) * (GRID + 1) * 3);
+const surfColors = new Float32Array((GRID + 1) * (GRID + 1) * 3);
+const surfIndices = [];
+for (let j = 0; j < GRID; j++) {
+  for (let i = 0; i < GRID; i++) {
+    const a = j * (GRID + 1) + i;
+    const b = a + 1;
+    const c = a + (GRID + 1);
+    const d = c + 1;
+    surfIndices.push(a, b, c);
+    surfIndices.push(b, d, c);
+  }
+}
+surfGeo.setAttribute('position', new THREE.BufferAttribute(surfVertices, 3));
+surfGeo.setAttribute('color', new THREE.BufferAttribute(surfColors, 3));
+surfGeo.setIndex(surfIndices);
+
+const surfMat = new THREE.MeshBasicMaterial({
+  vertexColors: true, transparent: true, opacity: 0.65,
+  side: THREE.DoubleSide, depthWrite: false
+});
+const surfMesh = new THREE.Mesh(surfGeo, surfMat);
+scene.add(surfMesh);
+
+// Decision boundary line in 3D (on z=0 plane)
+const dbGeo3d = new THREE.BufferGeometry();
+const dbVerts3d = new Float32Array(6);
+dbGeo3d.setAttribute('position', new THREE.BufferAttribute(dbVerts3d, 3));
+const dbMat3d = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+const dbLine3d = new THREE.Line(dbGeo3d, dbMat3d);
+scene.add(dbLine3d);
+
+// w vector in 3D
+const wArrowGeo = new THREE.BufferGeometry();
+const wArrowVerts = new Float32Array(6);
+wArrowGeo.setAttribute('position', new THREE.BufferAttribute(wArrowVerts, 3));
+const wArrowMat = new THREE.LineBasicMaterial({ color: 0xffdd44, linewidth: 2 });
+const wArrowLine = new THREE.Line(wArrowGeo, wArrowMat);
+scene.add(wArrowLine);
+
+function colormapThree(t) {
+  t = Math.max(-1, Math.min(1, t));
+  if (t >= 0) return [1, 1 - t, 1 - t];
+  const s = -t;
+  return [1 - s, 1 - s, 1];
+}
+
+function update3D() {
+  // Compute max |f| for normalization
+  const corners = [
+    [-RANGE, -RANGE], [-RANGE, RANGE], [RANGE, -RANGE], [RANGE, RANGE]
+  ];
+  let maxF = 0.01;
+  for (const [cx, cy] of corners) {
+    maxF = Math.max(maxF, Math.abs(w[0] * cx + w[1] * cy + w0));
+  }
+
+  // Update surface vertices and colors
+  // Three.js coords: x = x1, z = x2, y = f(x)
+  const pos = surfGeo.attributes.position.array;
+  const col = surfGeo.attributes.color.array;
+  for (let j = 0; j <= GRID; j++) {
+    for (let i = 0; i <= GRID; i++) {
+      const idx = j * (GRID + 1) + i;
+      const x1 = -RANGE + (i / GRID) * 2 * RANGE;
+      const x2 = -RANGE + (j / GRID) * 2 * RANGE;
+      const f = w[0] * x1 + w[1] * x2 + w0;
+      pos[idx * 3] = x1;
+      pos[idx * 3 + 1] = f;     // y = f(x)
+      pos[idx * 3 + 2] = x2;
+
+      const t = f / maxF;
+      const [r, g, b] = colormapThree(t);
+      col[idx * 3] = r;
+      col[idx * 3 + 1] = g;
+      col[idx * 3 + 2] = b;
+    }
+  }
+  surfGeo.attributes.position.needsUpdate = true;
+  surfGeo.attributes.color.needsUpdate = true;
+  surfGeo.computeVertexNormals();
+
+  // Update decision boundary in 3D
+  const dbPos = dbGeo3d.attributes.position.array;
+  const bPoints = [];
+  if (Math.abs(w[1]) > 1e-8) {
+    for (const x1 of [-RANGE, RANGE]) {
+      const x2 = -(w[0] * x1 + w0) / w[1];
+      if (x2 >= -RANGE && x2 <= RANGE) bPoints.push([x1, x2]);
+    }
+  }
+  if (Math.abs(w[0]) > 1e-8) {
+    for (const x2 of [-RANGE, RANGE]) {
+      const x1 = -(w[1] * x2 + w0) / w[0];
+      if (x1 >= -RANGE && x1 <= RANGE) bPoints.push([x1, x2]);
+    }
+  }
+  // Deduplicate
+  const unique = [];
+  for (const p of bPoints) {
+    if (!unique.some(u => Math.abs(u[0] - p[0]) < 1e-6 && Math.abs(u[1] - p[1]) < 1e-6)) {
+      unique.push(p);
+    }
+  }
+  if (unique.length >= 2) {
+    dbPos[0] = unique[0][0]; dbPos[1] = 0; dbPos[2] = unique[0][1];
+    dbPos[3] = unique[1][0]; dbPos[4] = 0; dbPos[5] = unique[1][1];
+    dbLine3d.visible = true;
+  } else {
+    dbLine3d.visible = false;
+  }
+  dbGeo3d.attributes.position.needsUpdate = true;
+
+  // Update w arrow in 3D (on y=0 plane)
+  const wa = wArrowGeo.attributes.position.array;
+  wa[0] = 0; wa[1] = 0; wa[2] = 0;
+  wa[3] = w[0]; wa[4] = 0; wa[5] = w[1];
+  wArrowGeo.attributes.position.needsUpdate = true;
+}
+
+function update() {
+  draw2D();
+  update3D();
+}
+
+// ── Bias slider ──
+const biasSlider = document.getElementById('biasSlider');
+const biasValue = document.getElementById('biasValue');
+biasSlider.addEventListener('input', () => {
+  w0 = parseFloat(biasSlider.value);
+  biasValue.textContent = w0.toFixed(2);
+  update();
+});
+
+// ── Animation loop ──
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// Initial draw
+update();
+animate();
+</script>
+</body>
+</html>
