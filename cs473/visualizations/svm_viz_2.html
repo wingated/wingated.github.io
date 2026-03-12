@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVM Quadratic Programming Visualization</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.4em;
+    margin-bottom: 4px;
+    color: #fff;
+    font-weight: 600;
+  }
+  .subtitle {
+    font-size: 0.85em;
+    color: #aaa;
+    margin-bottom: 16px;
+  }
+  .container {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .panel {
+    background: #16213e;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  .panel-title {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-align: center;
+    color: #ccc;
+  }
+  canvas {
+    display: block;
+    border-radius: 6px;
+    cursor: crosshair;
+  }
+  .controls {
+    margin-top: 16px;
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  button {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85em;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+  .btn-pos {
+    background: #2196F3;
+    color: #fff;
+  }
+  .btn-pos:hover { background: #1976D2; }
+  .btn-pos.active { outline: 2px solid #fff; outline-offset: 2px; }
+  .btn-neg {
+    background: #f44336;
+    color: #fff;
+  }
+  .btn-neg:hover { background: #d32f2f; }
+  .btn-neg.active { outline: 2px solid #fff; outline-offset: 2px; }
+  .btn-clear {
+    background: #444;
+    color: #ddd;
+  }
+  .btn-clear:hover { background: #555; }
+  .btn-solve {
+    background: #4CAF50;
+    color: #fff;
+  }
+  .btn-solve:hover { background: #388E3C; }
+  .legend {
+    font-size: 0.78em;
+    color: #999;
+    margin-top: 10px;
+    text-align: center;
+    line-height: 1.6;
+    max-width: 900px;
+  }
+  .info-bar {
+    font-size: 0.8em;
+    color: #bbb;
+    margin-top: 6px;
+    text-align: center;
+    min-height: 1.4em;
+  }
+</style>
+</head>
+<body>
+<h1>SVM Quadratic Programming</h1>
+<p class="subtitle">Explore the optimization behind support vector machines (bias = 0)</p>
+<div class="container">
+  <div class="panel">
+    <div class="panel-title">Weight Space &mdash; min &frac12;||w||&sup2; s.t. y<sub>i</sub>(w&middot;x<sub>i</sub>) &ge; 1</div>
+    <canvas id="weightCanvas" width="500" height="500"></canvas>
+    <div class="info-bar" id="weightInfo">Drag the white dot to change weights</div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Data Space &mdash; click to add points</div>
+    <canvas id="dataCanvas" width="500" height="500"></canvas>
+    <div class="info-bar" id="dataInfo">Click to add data points</div>
+  </div>
+</div>
+<div class="controls">
+  <button class="btn-pos active" id="btnPos" onclick="setClass(1)">+ Positive</button>
+  <button class="btn-neg" id="btnNeg" onclick="setClass(-1)">&minus; Negative</button>
+  <button class="btn-solve" id="btnSolve" onclick="solveQP()">Snap to Optimum</button>
+  <button class="btn-clear" onclick="clearAll()">Clear All</button>
+</div>
+<div class="legend">
+  <strong>Left pane:</strong> Blue = objective &frac12;||w||&sup2; (darker is lower). Red overlay = constraint violation region per data point. White dot = current w.<br>
+  <strong>Right pane:</strong> Solid line = decision boundary w&middot;x = 0. Dashed lines = margin boundaries w&middot;x = &pm;1.
+</div>
+<script>
+// ---- State ----
+const SIZE = 500;
+const W_RANGE = 5;   // weight space range [-W_RANGE, W_RANGE]
+const D_RANGE = 5;   // data space range
+let dataPoints = [];  // {x1, x2, y} where y is +1 or -1
+let currentClass = 1;
+let w = [1.0, 1.0];  // current weight vector
+let dragging = false;
+const wCanvas = document.getElementById('weightCanvas');
+const dCanvas = document.getElementById('dataCanvas');
+const wCtx = wCanvas.getContext('2d');
+const dCtx = dCanvas.getContext('2d');
+// Pre-render the objective heatmap as an offscreen image
+let objectiveImage = null;
+function buildObjectiveImage() {
+  const offscreen = document.createElement('canvas');
+  offscreen.width = SIZE;
+  offscreen.height = SIZE;
+  const ctx = offscreen.getContext('2d');
+  const imgData = ctx.createImageData(SIZE, SIZE);
+  const maxNormSq = 2 * W_RANGE * W_RANGE;
+  for (let py = 0; py < SIZE; py++) {
+    for (let px = 0; px < SIZE; px++) {
+      const w1 = (px / SIZE) * 2 * W_RANGE - W_RANGE;
+      const w2 = ((SIZE - 1 - py) / SIZE) * 2 * W_RANGE - W_RANGE;
+      const normSq = w1 * w1 + w2 * w2;
+      const t = Math.sqrt(normSq / maxNormSq); // 0..1
+      // Dark blue (low norm) to light blue/white (high norm)
+      const r = Math.round(10 + t * 80);
+      const g = Math.round(20 + t * 100);
+      const b = Math.round(80 + t * 175);
+      const idx = (py * SIZE + px) * 4;
+      imgData.data[idx]     = r;
+      imgData.data[idx + 1] = g;
+      imgData.data[idx + 2] = b;
+      imgData.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  objectiveImage = offscreen;
+}
+// ---- Coordinate transforms ----
+function w2px(v, range) { return (v + range) / (2 * range) * SIZE; }
+function px2w(p, range) { return (p / SIZE) * 2 * range - range; }
+function w2py(v, range) { return SIZE - (v + range) / (2 * range) * SIZE; }
+function py2w(p, range) { return ((SIZE - p) / SIZE) * 2 * range - range; }
+// ---- Drawing: Weight Space ----
+function drawWeightSpace() {
+  // Draw objective heatmap
+  wCtx.drawImage(objectiveImage, 0, 0);
+  // Draw constraint violation regions
+  // Constraint for point i: y_i * (w1*x1_i + w2*x2_i) >= 1
+  // Violation: y_i * (w1*x1_i + w2*x2_i) < 1
+  if (dataPoints.length > 0) {
+    // Build a violation overlay per-pixel
+    const imgData = wCtx.getImageData(0, 0, SIZE, SIZE);
+    // For performance, step by 2 pixels
+    const step = 2;
+    for (let py = 0; py < SIZE; py += step) {
+      for (let px = 0; px < SIZE; px += step) {
+        const w1 = px2w(px, W_RANGE);
+        const w2 = py2w(py, W_RANGE);
+        let violationCount = 0;
+        for (let i = 0; i < dataPoints.length; i++) {
+          const dp = dataPoints[i];
+          const margin = dp.y * (w1 * dp.x1 + w2 * dp.x2);
+          if (margin < 1) violationCount++;
+        }
+        if (violationCount > 0) {
+          const alpha = Math.min(violationCount * 0.25, 0.85);
+          // Blend red over existing pixels for the step x step block
+          for (let dy = 0; dy < step && py + dy < SIZE; dy++) {
+            for (let dx = 0; dx < step && px + dx < SIZE; dx++) {
+              const idx = ((py + dy) * SIZE + (px + dx)) * 4;
+              imgData.data[idx]     = Math.round(imgData.data[idx] * (1 - alpha) + 200 * alpha);
+              imgData.data[idx + 1] = Math.round(imgData.data[idx + 1] * (1 - alpha) + 40 * alpha);
+              imgData.data[idx + 2] = Math.round(imgData.data[idx + 2] * (1 - alpha) + 40 * alpha);
+            }
+          }
+        }
+      }
+    }
+    wCtx.putImageData(imgData, 0, 0);
+    // Draw constraint boundary lines: y_i * (w1*x1_i + w2*x2_i) = 1
+    for (let i = 0; i < dataPoints.length; i++) {
+      const dp = dataPoints[i];
+      // Line: dp.y * (w1*dp.x1 + w2*dp.x2) = 1
+      // => dp.x1*dp.y * w1 + dp.x2*dp.y * w2 = 1
+      const a = dp.x1 * dp.y;
+      const b = dp.x2 * dp.y;
+      // Draw line a*w1 + b*w2 = 1 across the canvas
+      wCtx.strokeStyle = dp.y === 1 ? 'rgba(100,180,255,0.6)' : 'rgba(255,120,100,0.6)';
+      wCtx.lineWidth = 1.5;
+      wCtx.beginPath();
+      const pts = clipLine(a, b, -1, -W_RANGE, W_RANGE, -W_RANGE, W_RANGE);
+      if (pts) {
+        wCtx.moveTo(w2px(pts.x1, W_RANGE), w2py(pts.y1, W_RANGE));
+        wCtx.lineTo(w2px(pts.x2, W_RANGE), w2py(pts.y2, W_RANGE));
+        wCtx.stroke();
+      }
+    }
+  }
+  // Draw axes
+  wCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+  wCtx.lineWidth = 1;
+  wCtx.beginPath();
+  wCtx.moveTo(w2px(0, W_RANGE), 0);
+  wCtx.lineTo(w2px(0, W_RANGE), SIZE);
+  wCtx.moveTo(0, w2py(0, W_RANGE));
+  wCtx.lineTo(SIZE, w2py(0, W_RANGE));
+  wCtx.stroke();
+  // Axis labels
+  wCtx.fillStyle = 'rgba(255,255,255,0.5)';
+  wCtx.font = '12px sans-serif';
+  wCtx.fillText('w\u2081', SIZE - 20, w2py(0, W_RANGE) - 6);
+  wCtx.fillText('w\u2082', w2px(0, W_RANGE) + 6, 16);
+  // Draw feasible region boundary emphasis - contour where all constraints met
+  // (handled by the overlay already)
+  // Draw weight dot
+  const wx = w2px(w[0], W_RANGE);
+  const wy = w2py(w[1], W_RANGE);
+  // Check feasibility
+  let feasible = true;
+  for (const dp of dataPoints) {
+    if (dp.y * (w[0] * dp.x1 + w[1] * dp.x2) < 1 - 1e-9) {
+      feasible = false;
+      break;
+    }
+  }
+  wCtx.beginPath();
+  wCtx.arc(wx, wy, 8, 0, Math.PI * 2);
+  wCtx.fillStyle = feasible ? '#fff' : '#ffcc00';
+  wCtx.fill();
+  wCtx.strokeStyle = '#000';
+  wCtx.lineWidth = 2;
+  wCtx.stroke();
+  // Norm label
+  const norm = Math.sqrt(w[0] * w[0] + w[1] * w[1]);
+  document.getElementById('weightInfo').textContent =
+    `w = (${w[0].toFixed(2)}, ${w[1].toFixed(2)})  |  \u00BD||w||\u00B2 = ${(norm * norm / 2).toFixed(2)}` +
+    (feasible ? '  \u2714 feasible' : '  \u2716 infeasible');
+}
+// Clip line ax + by = c to rectangle [xmin,xmax] x [ymin,ymax]
+function clipLine(a, b, c, xmin, xmax, ymin, ymax) {
+  const pts = [];
+  if (Math.abs(b) > 1e-12) {
+    // y = (c - a*x) / b at x = xmin and xmax
+    let y0 = (c - a * xmin) / b;
+    if (y0 >= ymin && y0 <= ymax) pts.push({x: xmin, y: y0});
+    let y1 = (c - a * xmax) / b;
+    if (y1 >= ymin && y1 <= ymax) pts.push({x: xmax, y: y1});
+  }
+  if (Math.abs(a) > 1e-12) {
+    let x0 = (c - b * ymin) / a;
+    if (x0 > xmin && x0 < xmax) pts.push({x: x0, y: ymin});
+    let x1 = (c - b * ymax) / a;
+    if (x1 > xmin && x1 < xmax) pts.push({x: x1, y: ymax});
+  }
+  if (pts.length >= 2) {
+    return {x1: pts[0].x, y1: pts[0].y, x2: pts[1].x, y2: pts[1].y};
+  }
+  return null;
+}
+// ---- Drawing: Data Space ----
+function drawDataSpace() {
+  dCtx.fillStyle = '#0f1a30';
+  dCtx.fillRect(0, 0, SIZE, SIZE);
+  // Grid
+  dCtx.strokeStyle = 'rgba(255,255,255,0.07)';
+  dCtx.lineWidth = 1;
+  for (let v = -D_RANGE + 1; v < D_RANGE; v++) {
+    dCtx.beginPath();
+    dCtx.moveTo(w2px(v, D_RANGE), 0);
+    dCtx.lineTo(w2px(v, D_RANGE), SIZE);
+    dCtx.stroke();
+    dCtx.beginPath();
+    dCtx.moveTo(0, w2py(v, D_RANGE));
+    dCtx.lineTo(SIZE, w2py(v, D_RANGE));
+    dCtx.stroke();
+  }
+  // Axes
+  dCtx.strokeStyle = 'rgba(255,255,255,0.2)';
+  dCtx.lineWidth = 1;
+  dCtx.beginPath();
+  dCtx.moveTo(w2px(0, D_RANGE), 0);
+  dCtx.lineTo(w2px(0, D_RANGE), SIZE);
+  dCtx.moveTo(0, w2py(0, D_RANGE));
+  dCtx.lineTo(SIZE, w2py(0, D_RANGE));
+  dCtx.stroke();
+  dCtx.fillStyle = 'rgba(255,255,255,0.5)';
+  dCtx.font = '12px sans-serif';
+  dCtx.fillText('x\u2081', SIZE - 20, w2py(0, D_RANGE) - 6);
+  dCtx.fillText('x\u2082', w2px(0, D_RANGE) + 6, 16);
+  // Decision boundary: w . x = 0 => w1*x1 + w2*x2 = 0
+  const normSq = w[0] * w[0] + w[1] * w[1];
+  if (normSq > 1e-12) {
+    // Shade regions
+    const shadeImg = dCtx.getImageData(0, 0, SIZE, SIZE);
+    const step = 3;
+    for (let py = 0; py < SIZE; py += step) {
+      for (let px = 0; px < SIZE; px += step) {
+        const x1 = px2w(px, D_RANGE);
+        const x2 = py2w(py, D_RANGE);
+        const val = w[0] * x1 + w[1] * x2;
+        const alpha = 0.08;
+        for (let dy = 0; dy < step && py + dy < SIZE; dy++) {
+          for (let dx = 0; dx < step && px + dx < SIZE; dx++) {
+            const idx = ((py + dy) * SIZE + (px + dx)) * 4;
+            if (val > 0) {
+              // Positive side: blue tint
+              shadeImg.data[idx + 2] = Math.min(255, shadeImg.data[idx + 2] + 40);
+            } else {
+              // Negative side: red tint
+              shadeImg.data[idx] = Math.min(255, shadeImg.data[idx] + 40);
+            }
+          }
+        }
+      }
+    }
+    dCtx.putImageData(shadeImg, 0, 0);
+    // Decision boundary line: w1*x1 + w2*x2 = 0
+    drawLineInDataSpace(w[0], w[1], 0, 'rgba(255,255,255,0.9)', 2.5, false);
+    // Margin lines: w . x = +1 and w . x = -1
+    drawLineInDataSpace(w[0], w[1], 1, 'rgba(255,255,100,0.5)', 1.5, true);
+    drawLineInDataSpace(w[0], w[1], -1, 'rgba(255,255,100,0.5)', 1.5, true);
+    // Draw w vector from origin
+    const wScale = D_RANGE / W_RANGE;
+    const arrowX = w2px(w[0] * wScale * 0.5, D_RANGE);
+    const arrowY = w2py(w[1] * wScale * 0.5, D_RANGE);
+    const originX = w2px(0, D_RANGE);
+    const originY = w2py(0, D_RANGE);
+    dCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+    dCtx.lineWidth = 1.5;
+    dCtx.beginPath();
+    dCtx.moveTo(originX, originY);
+    dCtx.lineTo(arrowX, arrowY);
+    dCtx.stroke();
+    // Arrowhead
+    const angle = Math.atan2(originY - arrowY, arrowX - originX);
+    dCtx.beginPath();
+    dCtx.moveTo(arrowX, arrowY);
+    dCtx.lineTo(arrowX - 8 * Math.cos(angle - 0.4), arrowY + 8 * Math.sin(angle - 0.4));
+    dCtx.moveTo(arrowX, arrowY);
+    dCtx.lineTo(arrowX - 8 * Math.cos(angle + 0.4), arrowY + 8 * Math.sin(angle + 0.4));
+    dCtx.stroke();
+  }
+  // Draw data points
+  for (const dp of dataPoints) {
+    const px = w2px(dp.x1, D_RANGE);
+    const py = w2py(dp.x2, D_RANGE);
+    dCtx.beginPath();
+    if (dp.y === 1) {
+      // Positive: filled circle
+      dCtx.arc(px, py, 7, 0, Math.PI * 2);
+      dCtx.fillStyle = '#4db8ff';
+      dCtx.fill();
+      dCtx.strokeStyle = '#fff';
+      dCtx.lineWidth = 1.5;
+      dCtx.stroke();
+    } else {
+      // Negative: filled triangle
+      const r = 8;
+      dCtx.moveTo(px, py - r);
+      dCtx.lineTo(px - r * 0.866, py + r * 0.5);
+      dCtx.lineTo(px + r * 0.866, py + r * 0.5);
+      dCtx.closePath();
+      dCtx.fillStyle = '#ff6b6b';
+      dCtx.fill();
+      dCtx.strokeStyle = '#fff';
+      dCtx.lineWidth = 1.5;
+      dCtx.stroke();
+    }
+    // Highlight support vectors (margin = 1)
+    if (normSq > 1e-12) {
+      const margin = dp.y * (w[0] * dp.x1 + w[1] * dp.x2);
+      if (Math.abs(margin - 1) < 0.08) {
+        dCtx.beginPath();
+        dCtx.arc(px, py, 12, 0, Math.PI * 2);
+        dCtx.strokeStyle = 'rgba(255,255,100,0.7)';
+        dCtx.lineWidth = 2;
+        dCtx.stroke();
+      }
+    }
+  }
+  const count = dataPoints.length;
+  const pos = dataPoints.filter(p => p.y === 1).length;
+  document.getElementById('dataInfo').textContent =
+    count === 0 ? 'Click to add data points' :
+    `${count} point${count !== 1 ? 's' : ''} (${pos} positive, ${count - pos} negative)`;
+}
+function drawLineInDataSpace(a, b, c, color, width, dashed) {
+  const pts = clipLine(a, b, c, -D_RANGE, D_RANGE, -D_RANGE, D_RANGE);
+  if (!pts) return;
+  dCtx.strokeStyle = color;
+  dCtx.lineWidth = width;
+  if (dashed) dCtx.setLineDash([6, 4]);
+  else dCtx.setLineDash([]);
+  dCtx.beginPath();
+  dCtx.moveTo(w2px(pts.x1, D_RANGE), w2py(pts.y1, D_RANGE));
+  dCtx.lineTo(w2px(pts.x2, D_RANGE), w2py(pts.y2, D_RANGE));
+  dCtx.stroke();
+  dCtx.setLineDash([]);
+}
+// ---- Interaction ----
+function setClass(c) {
+  currentClass = c;
+  document.getElementById('btnPos').classList.toggle('active', c === 1);
+  document.getElementById('btnNeg').classList.toggle('active', c === -1);
+}
+function clearAll() {
+  dataPoints = [];
+  w = [1.0, 1.0];
+  redraw();
+}
+// Data canvas: add points
+dCanvas.addEventListener('click', (e) => {
+  const rect = dCanvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (SIZE / rect.width);
+  const py = (e.clientY - rect.top) * (SIZE / rect.height);
+  const x1 = px2w(px, D_RANGE);
+  const x2 = py2w(py, D_RANGE);
+  dataPoints.push({x1, x2, y: currentClass});
+  redraw();
+});
+// Weight canvas: drag the dot
+wCanvas.addEventListener('mousedown', (e) => {
+  const rect = wCanvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (SIZE / rect.width);
+  const py = (e.clientY - rect.top) * (SIZE / rect.height);
+  const wx = w2px(w[0], W_RANGE);
+  const wy = w2py(w[1], W_RANGE);
+  if (Math.hypot(px - wx, py - wy) < 20) {
+    dragging = true;
+  }
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const rect = wCanvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (SIZE / rect.width);
+  const py = (e.clientY - rect.top) * (SIZE / rect.height);
+  w[0] = Math.max(-W_RANGE, Math.min(W_RANGE, px2w(px, W_RANGE)));
+  w[1] = Math.max(-W_RANGE, Math.min(W_RANGE, py2w(py, W_RANGE)));
+  redraw();
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+// ---- Simple QP Solver (projected gradient descent) ----
+function solveQP() {
+  if (dataPoints.length === 0) return;
+  // Minimize 0.5 * ||w||^2 subject to y_i * (w . x_i) >= 1
+  // Use projected gradient descent
+  let wOpt = [w[0], w[1]];
+  const lr = 0.01;
+  const iters = 5000;
+  for (let iter = 0; iter < iters; iter++) {
+    // Gradient of objective: w
+    let g0 = wOpt[0];
+    let g1 = wOpt[1];
+    // Project: ensure all constraints satisfied
+    // After gradient step, project onto feasible set
+    wOpt[0] -= lr * g0;
+    wOpt[1] -= lr * g1;
+    // Project onto feasible set by iterating over constraints
+    for (let proj = 0; proj < 10; proj++) {
+      let allSatisfied = true;
+      for (const dp of dataPoints) {
+        const margin = dp.y * (wOpt[0] * dp.x1 + wOpt[1] * dp.x2);
+        if (margin < 1) {
+          // Push w in direction y_i * x_i
+          const deficit = 1 - margin;
+          const xNormSq = dp.x1 * dp.x1 + dp.x2 * dp.x2;
+          if (xNormSq > 1e-12) {
+            const step = deficit / xNormSq;
+            wOpt[0] += step * dp.y * dp.x1;
+            wOpt[1] += step * dp.y * dp.x2;
+          }
+          allSatisfied = false;
+        }
+      }
+      if (allSatisfied) break;
+    }
+  }
+  // Animate to solution
+  const startW = [w[0], w[1]];
+  const endW = [wOpt[0], wOpt[1]];
+  const duration = 400;
+  const startTime = performance.now();
+  function animate(now) {
+    const t = Math.min(1, (now - startTime) / duration);
+    const ease = t * (2 - t); // ease-out
+    w[0] = startW[0] + (endW[0] - startW[0]) * ease;
+    w[1] = startW[1] + (endW[1] - startW[1]) * ease;
+    redraw();
+    if (t < 1) requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+}
+// ---- Main ----
+function redraw() {
+  drawWeightSpace();
+  drawDataSpace();
+}
+buildObjectiveImage();
+redraw();
+</script>
+</body>
+</html>
