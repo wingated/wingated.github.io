@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interactive Decision Tree</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; background: #0f1117; color: #e0e0e0; }
+
+  #toolbar {
+    height: 52px; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; background: #1a1d27; border-bottom: 1px solid #2a2d3a;
+    flex-shrink: 0; font-size: 14px;
+  }
+  #toolbar button {
+    padding: 6px 14px; border: 1px solid #3a3d4a; border-radius: 6px;
+    background: #252836; color: #ccc; cursor: pointer; font-size: 13px; transition: all .15s;
+  }
+  #toolbar button:hover { background: #33364a; }
+  #toolbar button.active { border-color: #7c8aff; background: #7c8aff; color: #fff; }
+  .classBtn { width: 34px; height: 34px; border-radius: 50% !important; padding: 0 !important; font-weight: 700; color: #fff !important; border: 3px solid transparent !important; }
+  .classBtn.active { border-color: #e0e0e0 !important; box-shadow: 0 0 0 2px #1a1d27, 0 0 0 4px #e0e0e0; }
+  .sep { width: 1px; height: 28px; background: #2a2d3a; margin: 0 4px; }
+  #splitControls { display: flex; align-items: center; gap: 8px; }
+  #splitControls button.axisBtn.active { background: #7c8aff; color: #fff; border-color: #7c8aff; }
+  #confirmBtn { background: #059669 !important; color: #fff !important; border-color: #059669 !important; }
+  #confirmBtn:hover { background: #047857 !important; }
+  #cancelBtn { background: #dc2626 !important; color: #fff !important; border-color: #dc2626 !important; }
+  #cancelBtn:hover { background: #b91c1c !important; }
+  #resetBtn { background: #252836; }
+  .toolbar-label { font-weight: 600; color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+
+  #main { flex: 1; display: flex; overflow: hidden; }
+  #leftPane {
+    width: 40%; min-width: 300px; display: flex; flex-direction: column;
+    border-right: 1px solid #2a2d3a; background: #14161e; overflow: auto;
+  }
+  #rightPane { flex: 1; display: flex; flex-direction: column; position: relative; }
+  .pane-header {
+    height: 32px; display: flex; align-items: center; padding: 0 12px;
+    font-size: 12px; font-weight: 600; color: #666; text-transform: uppercase;
+    letter-spacing: .5px; border-bottom: 1px solid #2a2d3a; flex-shrink: 0;
+    background: #1a1d27;
+  }
+  #treeSvg { flex: 1; width: 100%; }
+  #dataCanvas { flex: 1; width: 100%; cursor: crosshair; display: block; }
+  #instructions {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #555; font-size: 14px; text-align: center; pointer-events: none;
+    line-height: 1.6;
+  }
+  #splitCostBar {
+    display: none; align-items: center; gap: 12px; margin-left: 8px;
+    font-size: 12px; color: #aaa;
+  }
+  #splitCostBar .cost-label { color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; font-size: 11px; }
+  #splitCostBar .cost-val { font-variant-numeric: tabular-nums; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+  #splitCostBar .cost-no-split { background: #2a2d3a; color: #f87171; }
+  #splitCostBar .cost-split { background: #2a2d3a; color: #34d399; }
+  #splitCostBar .cost-arrow { color: #555; }
+  #splitCostBar .cost-delta { font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+  #splitCostBar .cost-delta.good { background: #064e3b; color: #34d399; }
+  #splitCostBar .cost-delta.bad { background: #450a0a; color: #f87171; }
+  #splitCostBar .cost-delta.neutral { background: #2a2d3a; color: #888; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="resetBtn">Reset</button>
+  <div class="sep"></div>
+  <span class="toolbar-label">Class:</span>
+  <button class="classBtn" data-class="0">A</button>
+  <button class="classBtn" data-class="1">B</button>
+  <button class="classBtn" data-class="2">C</button>
+  <button class="classBtn" data-class="3">D</button>
+  <div class="sep"></div>
+  <div id="splitControls" style="display:none">
+    <span class="toolbar-label">Split axis:</span>
+    <button class="axisBtn" id="axisXBtn">X</button>
+    <button class="axisBtn" id="axisYBtn">Y</button>
+    <button id="confirmBtn">Confirm</button>
+    <button id="cancelBtn">Cancel</button>
+    <div class="sep"></div>
+    <div id="splitCostBar">
+      <span class="cost-label">Cost:</span>
+      <span class="cost-val cost-no-split" id="costNoSplit">--</span>
+      <span class="cost-arrow">&rarr;</span>
+      <span class="cost-val cost-split" id="costSplit">--</span>
+      <span class="cost-delta neutral" id="costDelta">--</span>
+    </div>
+  </div>
+  <span id="normalHint" style="color:#aaa;font-size:12px">Click a leaf node to split</span>
+</div>
+
+<div id="main">
+  <div id="leftPane">
+    <div class="pane-header">Decision Tree</div>
+    <svg id="treeSvg"></svg>
+  </div>
+  <div id="rightPane">
+    <div class="pane-header">Data Space</div>
+    <canvas id="dataCanvas"></canvas>
+    <div id="instructions">Click to add data points<br>Then split nodes in the tree</div>
+  </div>
+</div>
+
+<script>
+const CLASS_COLORS = ['#6b9bd2', '#f07072', '#6fcf63', '#ffa94d'];
+const CLASS_COLORS_LIGHT = ['rgba(107,155,210,0.18)', 'rgba(240,112,114,0.18)', 'rgba(111,207,99,0.18)', 'rgba(255,169,77,0.18)'];
+const NODE_W = 140, NODE_H = 64, LEVEL_H = 100, PAD = 20;
+
+let state, nodeMap;
+const svg = document.getElementById('treeSvg');
+const canvas = document.getElementById('dataCanvas');
+const ctx = canvas.getContext('2d');
+
+// ── State ──
+function initState() {
+  const root = makeNode(null, false);
+  state = {
+    mode: 'normal', dataPoints: [], tree: root, selectedClass: 0,
+    splitTarget: null, splitAxis: 'x', splitThreshold: 0.5,
+    ghostLeft: null, ghostRight: null, isDragging: false, nextId: root.id + 1
+  };
+  nodeMap = {}; nodeMap[root.id] = root;
+  updateUI();
+}
+function makeNode(parent, isGhost) {
+  const id = state ? state.nextId++ : 0;
+  return { id, parent, left: null, right: null, axis: null, threshold: null,
+           isLeaf: true, isGhost, classCounts: [0,0,0,0], totalCount: 0, gini: 0,
+           layoutX: 0, layoutY: 0, depth: 0 };
+}
+
+// ── Gini ──
+function computeGini(counts) {
+  const total = counts.reduce((a,b) => a+b, 0);
+  if (total === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < counts.length; i++) { const p = counts[i]/total; sum += p*p; }
+  return 1 - sum;
+}
+
+// ── Classify ──
+function classifyPoint(pt, node) {
+  if (!node) return null;
+  if (node.isLeaf) return node;
+  const val = node.axis === 'x' ? pt.x : pt.y;
+  return val < node.threshold ? classifyPoint(pt, node.left) : classifyPoint(pt, node.right);
+}
+
+function recomputeStats() {
+  // reset all leaves
+  function resetNode(n) {
+    if (!n) return;
+    n.classCounts = [0,0,0,0]; n.totalCount = 0; n.gini = 0;
+    resetNode(n.left); resetNode(n.right);
+  }
+  resetNode(state.tree);
+  for (const pt of state.dataPoints) {
+    const leaf = classifyPoint(pt, state.tree);
+    if (leaf) { leaf.classCounts[pt.classIdx]++; leaf.totalCount++; }
+  }
+  function updateGini(n) {
+    if (!n) return;
+    if (n.isLeaf) { n.gini = computeGini(n.classCounts); }
+    else {
+      n.classCounts = [0,0,0,0]; n.totalCount = 0;
+      if (n.left) { for (let i=0;i<4;i++) n.classCounts[i]+=n.left.classCounts[i]; n.totalCount+=n.left.totalCount; }
+      if (n.right) { for (let i=0;i<4;i++) n.classCounts[i]+=n.right.classCounts[i]; n.totalCount+=n.right.totalCount; }
+      n.gini = computeGini(n.classCounts);
+    }
+    updateGini(n.left); updateGini(n.right);
+  }
+  // bottom-up gini
+  function postOrder(n) {
+    if (!n) return;
+    postOrder(n.left); postOrder(n.right);
+    n.gini = computeGini(n.classCounts);
+    if (!n.isLeaf) {
+      n.classCounts = [0,0,0,0]; n.totalCount = 0;
+      for (const c of [n.left, n.right]) {
+        if (c) { for (let i=0;i<4;i++) n.classCounts[i]+=c.classCounts[i]; n.totalCount+=c.totalCount; }
+      }
+      n.gini = computeGini(n.classCounts);
+    }
+  }
+  postOrder(state.tree);
+}
+
+// ── Regions ──
+function computeRegions(node, xMin, xMax, yMin, yMax, out) {
+  if (!node) return;
+  if (node.isLeaf) { out.push({ xMin, xMax, yMin, yMax, node }); return; }
+  if (node.axis === 'x') {
+    computeRegions(node.left, xMin, node.threshold, yMin, yMax, out);
+    computeRegions(node.right, node.threshold, xMax, yMin, yMax, out);
+  } else {
+    computeRegions(node.left, xMin, xMax, yMin, node.threshold, out);
+    computeRegions(node.right, xMin, xMax, node.threshold, yMax, out);
+  }
+}
+function getNodeRegion(node) {
+  // walk from root to node
+  const path = [];
+  let n = node;
+  while (n.parent) { path.unshift(n); n = n.parent; }
+  let xMin=0, xMax=1, yMin=0, yMax=1;
+  n = state.tree;
+  for (const child of path) {
+    if (n.axis === 'x') {
+      if (child === n.left) xMax = n.threshold; else xMin = n.threshold;
+    } else {
+      if (child === n.left) yMax = n.threshold; else yMin = n.threshold;
+    }
+    n = child;
+  }
+  return { xMin, xMax, yMin, yMax };
+}
+
+// ── Layout ──
+let leafCounter;
+function layoutTree(node, depth) {
+  if (!node) return;
+  node.depth = depth;
+  if (node.isLeaf) {
+    node.layoutX = leafCounter++;
+    node.layoutY = depth;
+  } else {
+    layoutTree(node.left, depth+1);
+    layoutTree(node.right, depth+1);
+    node.layoutX = (node.left.layoutX + node.right.layoutX) / 2;
+    node.layoutY = depth;
+  }
+}
+function doLayout() {
+  leafCounter = 0;
+  layoutTree(state.tree, 0);
+}
+
+// ── Render Tree (SVG) ──
+function renderTreePane() {
+  doLayout();
+  const allNodes = [];
+  function collect(n) { if (!n) return; allNodes.push(n); collect(n.left); collect(n.right); }
+  collect(state.tree);
+
+  const maxX = Math.max(...allNodes.map(n=>n.layoutX));
+  const maxY = Math.max(...allNodes.map(n=>n.layoutY));
+  const svgW = (maxX+1) * (NODE_W + PAD) + PAD;
+  const svgH = (maxY+1) * LEVEL_H + PAD*2;
+
+  svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+  svg.innerHTML = '';
+
+  function cx(n) { return PAD + n.layoutX * (NODE_W + PAD) + NODE_W/2; }
+  function cy(n) { return PAD + n.layoutY * LEVEL_H + NODE_H/2; }
+
+  // edges
+  for (const n of allNodes) {
+    if (n.left) drawEdge(cx(n), cy(n)+NODE_H/2, cx(n.left), cy(n.left)-NODE_H/2, n.left.isGhost);
+    if (n.right) drawEdge(cx(n), cy(n)+NODE_H/2, cx(n.right), cy(n.right)-NODE_H/2, n.right.isGhost);
+  }
+  // nodes
+  for (const n of allNodes) drawNode(n, cx(n)-NODE_W/2, cy(n)-NODE_H/2);
+}
+
+function drawEdge(x1,y1,x2,y2,ghost) {
+  const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+  line.setAttribute('x1',x1); line.setAttribute('y1',y1);
+  line.setAttribute('x2',x2); line.setAttribute('y2',y2);
+  line.setAttribute('stroke', ghost ? '#3a3d4a' : '#4a4d5a');
+  line.setAttribute('stroke-width', ghost ? 1 : 1.5);
+  if (ghost) line.setAttribute('stroke-dasharray','4,3');
+  svg.appendChild(line);
+}
+
+function drawNode(n, x, y) {
+  const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.setAttribute('transform', `translate(${x},${y})`);
+  if (n.isGhost) g.setAttribute('opacity', '0.55');
+
+  const isTarget = state.splitTarget && state.splitTarget.id === n.id;
+
+  // background
+  const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  rect.setAttribute('width', NODE_W); rect.setAttribute('height', NODE_H);
+  rect.setAttribute('rx', 8); rect.setAttribute('ry', 8);
+  rect.setAttribute('fill', isTarget ? '#2a2520' : '#1e2030');
+  rect.setAttribute('stroke', isTarget ? '#f59e0b' : (n.isGhost ? '#3a3d4a' : (n.isLeaf ? '#6b9bd2' : '#4a4d5a')));
+  rect.setAttribute('stroke-width', isTarget ? 2 : 1.5);
+  if (n.isGhost) rect.setAttribute('stroke-dasharray','5,3');
+  g.appendChild(rect);
+
+  // label
+  const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+  label.setAttribute('x', 8); label.setAttribute('y', 15);
+  label.setAttribute('font-size', '11'); label.setAttribute('fill', '#bbb');
+  label.setAttribute('font-family', 'inherit');
+  if (n.isLeaf && !n.isGhost) {
+    const majority = n.classCounts.indexOf(Math.max(...n.classCounts));
+    label.textContent = n.totalCount > 0 ? `Leaf (${String.fromCharCode(65+majority)})` : 'Leaf (empty)';
+  } else if (!n.isLeaf) {
+    label.textContent = `${n.axis.toUpperCase()} < ${n.threshold.toFixed(2)}`;
+  } else {
+    label.textContent = 'Ghost';
+  }
+  g.appendChild(label);
+
+  // gini
+  const giniText = document.createElementNS('http://www.w3.org/2000/svg','text');
+  giniText.setAttribute('x', NODE_W - 8); giniText.setAttribute('y', 15);
+  giniText.setAttribute('font-size', '10'); giniText.setAttribute('fill', '#777');
+  giniText.setAttribute('text-anchor', 'end'); giniText.setAttribute('font-family','inherit');
+  giniText.textContent = `G=${n.gini.toFixed(3)}`;
+  g.appendChild(giniText);
+
+  // count
+  const countText = document.createElementNS('http://www.w3.org/2000/svg','text');
+  countText.setAttribute('x', NODE_W - 8); countText.setAttribute('y', 28);
+  countText.setAttribute('font-size', '10'); countText.setAttribute('fill', '#555');
+  countText.setAttribute('text-anchor', 'end'); countText.setAttribute('font-family','inherit');
+  countText.textContent = `n=${n.totalCount}`;
+  g.appendChild(countText);
+
+  // bar chart
+  const barY = 34, barH = 22, barX = 8, barW = NODE_W - 16;
+  const bgRect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  bgRect.setAttribute('x',barX); bgRect.setAttribute('y',barY);
+  bgRect.setAttribute('width',barW); bgRect.setAttribute('height',barH);
+  bgRect.setAttribute('rx',3); bgRect.setAttribute('fill','#2a2d3a');
+  g.appendChild(bgRect);
+
+  if (n.totalCount > 0) {
+    let bx = barX;
+    for (let i = 0; i < 4; i++) {
+      const w = (n.classCounts[i] / n.totalCount) * barW;
+      if (w > 0) {
+        const bar = document.createElementNS('http://www.w3.org/2000/svg','rect');
+        bar.setAttribute('x', bx); bar.setAttribute('y', barY);
+        bar.setAttribute('width', w); bar.setAttribute('height', barH);
+        if (i === 0) bar.setAttribute('rx', 3);
+        bar.setAttribute('fill', CLASS_COLORS[i]);
+        g.appendChild(bar);
+      }
+      bx += w;
+    }
+    // round right edge clip
+    const clip = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    clip.setAttribute('x',barX); clip.setAttribute('y',barY);
+    clip.setAttribute('width',barW); clip.setAttribute('height',barH);
+    clip.setAttribute('rx',3); clip.setAttribute('fill','none');
+    clip.setAttribute('stroke','#2a2d3a'); clip.setAttribute('stroke-width','0');
+    g.appendChild(clip);
+  }
+
+  // click handler for leaf nodes
+  if (n.isLeaf && !n.isGhost) {
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', () => enterSplitMode(n));
+
+    // delete button (small x) — only if not root
+    if (n.parent) {
+      const del = document.createElementNS('http://www.w3.org/2000/svg','g');
+      del.setAttribute('transform', `translate(${NODE_W - 6}, -6)`);
+      del.style.cursor = 'pointer';
+      del.setAttribute('class','del-btn');
+      const dc = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      dc.setAttribute('r', 8); dc.setAttribute('fill','#ef4444'); dc.setAttribute('opacity','0');
+      del.appendChild(dc);
+      const dt = document.createElementNS('http://www.w3.org/2000/svg','text');
+      dt.setAttribute('text-anchor','middle'); dt.setAttribute('dy','4');
+      dt.setAttribute('font-size','12'); dt.setAttribute('fill','#ef4444');
+      dt.setAttribute('font-weight','bold'); dt.textContent = '\u00d7';
+      del.appendChild(dt);
+      del.addEventListener('click', (e) => { e.stopPropagation(); deleteLeaf(n); });
+      // show on hover
+      g.addEventListener('mouseenter', () => { dc.setAttribute('opacity','1'); dt.setAttribute('fill','#fff'); });
+      g.addEventListener('mouseleave', () => { dc.setAttribute('opacity','0'); dt.setAttribute('fill','#ef4444'); });
+      g.appendChild(del);
+    }
+  }
+
+  svg.appendChild(g);
+}
+
+// ── Render Data Pane (Canvas) ──
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function dataToCanvas(dx, dy) {
+  const rect = canvas.getBoundingClientRect();
+  const pad = 30;
+  return [pad + dx * (rect.width - 2*pad), pad + (1-dy) * (rect.height - 2*pad)];
+}
+function canvasToData(cx, cy) {
+  const rect = canvas.getBoundingClientRect();
+  const pad = 30;
+  return [(cx - pad) / (rect.width - 2*pad), 1 - (cy - pad) / (rect.height - 2*pad)];
+}
+
+function renderDataPane() {
+  const rect = canvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // regions
+  const regions = [];
+  computeRegions(state.tree, 0, 1, 0, 1, regions);
+  for (const r of regions) {
+    const [x1,y1] = dataToCanvas(r.xMin, r.yMax);
+    const [x2,y2] = dataToCanvas(r.xMax, r.yMin);
+    // majority class color
+    const n = r.node;
+    if (n.totalCount > 0) {
+      const maj = n.classCounts.indexOf(Math.max(...n.classCounts));
+      ctx.fillStyle = CLASS_COLORS_LIGHT[maj];
+      ctx.fillRect(x1, y1, x2-x1, y2-y1);
+    }
+    // region border
+    ctx.strokeStyle = '#2a2d3a';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x1, y1, x2-x1, y2-y1);
+  }
+
+  // boundary line in split mode
+  if (state.mode === 'split' && state.splitTarget) {
+    const reg = getNodeRegion(state.splitTarget);
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#f59e0b';
+    if (state.splitAxis === 'x') {
+      const [bx, by1] = dataToCanvas(state.splitThreshold, reg.yMax);
+      const [, by2] = dataToCanvas(state.splitThreshold, reg.yMin);
+      ctx.beginPath(); ctx.moveTo(bx, by1); ctx.lineTo(bx, by2); ctx.stroke();
+    } else {
+      const [bx1, by] = dataToCanvas(reg.xMin, state.splitThreshold);
+      const [bx2] = dataToCanvas(reg.xMax, state.splitThreshold);
+      ctx.beginPath(); ctx.moveTo(bx1, by); ctx.lineTo(bx2, by); ctx.stroke();
+    }
+    ctx.restore();
+
+    // draw handle
+    ctx.save();
+    if (state.splitAxis === 'x') {
+      const [bx, by1] = dataToCanvas(state.splitThreshold, reg.yMax);
+      const [, by2] = dataToCanvas(state.splitThreshold, reg.yMin);
+      const midY = (by1+by2)/2;
+      ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(bx, midY, 7, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('\u2194', bx, midY);
+    } else {
+      const [bx1, by] = dataToCanvas(reg.xMin, state.splitThreshold);
+      const [bx2] = dataToCanvas(reg.xMax, state.splitThreshold);
+      const midX = (bx1+bx2)/2;
+      ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(midX, by, 7, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('\u2195', midX, by);
+    }
+    ctx.restore();
+  }
+
+  // axes
+  ctx.strokeStyle = '#3a3d4a'; ctx.lineWidth = 1;
+  const [ox, oy] = dataToCanvas(0, 0);
+  const [ex] = dataToCanvas(1, 0);
+  const [, ey] = dataToCanvas(0, 1);
+  ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(ex,oy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(ox,ey); ctx.stroke();
+  // tick labels
+  ctx.fillStyle = '#666'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  for (let t = 0; t <= 1; t += 0.25) {
+    const [tx, ty] = dataToCanvas(t, 0);
+    ctx.fillText(t.toFixed(1), tx, ty + 14);
+  }
+  ctx.textAlign = 'right';
+  for (let t = 0; t <= 1; t += 0.25) {
+    const [tx, ty] = dataToCanvas(0, t);
+    ctx.fillText(t.toFixed(1), tx - 6, ty + 3);
+  }
+
+  // data points
+  for (const pt of state.dataPoints) {
+    const [px, py] = dataToCanvas(pt.x, pt.y);
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2);
+    ctx.fillStyle = CLASS_COLORS[pt.classIdx]; ctx.fill();
+    ctx.strokeStyle = '#0f1117'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+
+  // instructions
+  const inst = document.getElementById('instructions');
+  inst.style.display = state.dataPoints.length === 0 ? '' : 'none';
+}
+
+// ── Split Cost ──
+// Cost = weighted average Gini of all leaves, weighted by proportion of total data points in each leaf.
+// "No split" cost: treat the split target as a single leaf (its current Gini).
+// "Split" cost: replace that leaf's contribution with the two ghost children's weighted Gini.
+function computeSplitCosts() {
+  const totalPts = state.dataPoints.length;
+  if (totalPts === 0 || !state.splitTarget) return null;
+
+  // Collect all current leaves
+  const leaves = [];
+  function collectLeaves(n) {
+    if (!n) return;
+    if (n.isLeaf) { leaves.push(n); return; }
+    collectLeaves(n.left); collectLeaves(n.right);
+  }
+  collectLeaves(state.tree);
+
+  // Cost without split: for the split target node, use its combined counts (ghost left + ghost right)
+  // For all other leaves, use their own counts. The split target is currently not a leaf (it has ghost children),
+  // so we sum the ghost children as if they were one node.
+  let costNoSplit = 0;
+  const targetCounts = [0,0,0,0];
+  let targetTotal = 0;
+  if (state.ghostLeft && state.ghostRight) {
+    for (let i = 0; i < 4; i++) targetCounts[i] = state.ghostLeft.classCounts[i] + state.ghostRight.classCounts[i];
+    targetTotal = state.ghostLeft.totalCount + state.ghostRight.totalCount;
+  }
+  // Sum weighted gini for non-ghost leaves
+  for (const leaf of leaves) {
+    if (leaf.isGhost) continue;
+    costNoSplit += (leaf.totalCount / totalPts) * leaf.gini;
+  }
+  // Add the unsplit target's contribution
+  const unsplitGini = computeGini(targetCounts);
+  costNoSplit += (targetTotal / totalPts) * unsplitGini;
+
+  // Cost with split: use ghost children individually
+  let costSplit = 0;
+  for (const leaf of leaves) {
+    costSplit += (leaf.totalCount / totalPts) * leaf.gini;
+  }
+
+  return { costNoSplit, costSplit, delta: costSplit - costNoSplit };
+}
+
+function updateSplitCostDisplay() {
+  const bar = document.getElementById('splitCostBar');
+  if (state.mode !== 'split') { bar.style.display = 'none'; return; }
+
+  const costs = computeSplitCosts();
+  if (!costs) { bar.style.display = 'none'; return; }
+
+  bar.style.display = 'flex';
+  document.getElementById('costNoSplit').textContent = costs.costNoSplit.toFixed(4);
+  document.getElementById('costSplit').textContent = costs.costSplit.toFixed(4);
+
+  const deltaEl = document.getElementById('costDelta');
+  const d = costs.delta;
+  deltaEl.textContent = (d >= 0 ? '+' : '') + d.toFixed(4);
+  deltaEl.className = 'cost-delta ' + (d < -0.0001 ? 'good' : (d > 0.0001 ? 'bad' : 'neutral'));
+}
+
+function renderAll() {
+  recomputeStats();
+  renderTreePane();
+  renderDataPane();
+  updateSplitCostDisplay();
+}
+
+// ── Split Mode ──
+function enterSplitMode(leaf) {
+  if (state.mode === 'split') return;
+  state.mode = 'split';
+  state.splitTarget = leaf;
+  state.splitAxis = 'x';
+
+  const reg = getNodeRegion(leaf);
+  state.splitThreshold = (state.splitAxis === 'x') ? (reg.xMin+reg.xMax)/2 : (reg.yMin+reg.yMax)/2;
+
+  // create ghost children
+  leaf.isLeaf = false;
+  leaf.axis = state.splitAxis;
+  leaf.threshold = state.splitThreshold;
+
+  const gl = makeNode(leaf, true); gl.isLeaf = true;
+  const gr = makeNode(leaf, true); gr.isLeaf = true;
+  leaf.left = gl; leaf.right = gr;
+  state.ghostLeft = gl; state.ghostRight = gr;
+  nodeMap[gl.id] = gl; nodeMap[gr.id] = gr;
+
+  updateUI();
+  renderAll();
+}
+
+function updateSplitThreshold(thresh) {
+  const reg = getNodeRegion(state.splitTarget);
+  if (state.splitAxis === 'x') {
+    thresh = Math.max(reg.xMin + 0.01, Math.min(reg.xMax - 0.01, thresh));
+  } else {
+    thresh = Math.max(reg.yMin + 0.01, Math.min(reg.yMax - 0.01, thresh));
+  }
+  state.splitThreshold = thresh;
+  state.splitTarget.threshold = thresh;
+  state.splitTarget.axis = state.splitAxis;
+  renderAll();
+}
+
+function confirmSplit() {
+  if (state.mode !== 'split') return;
+  state.ghostLeft.isGhost = false;
+  state.ghostRight.isGhost = false;
+  state.mode = 'normal';
+  state.splitTarget = null;
+  state.ghostLeft = null; state.ghostRight = null;
+  updateUI();
+  renderAll();
+}
+
+function cancelSplit() {
+  if (state.mode !== 'split') return;
+  const t = state.splitTarget;
+  delete nodeMap[t.left.id]; delete nodeMap[t.right.id];
+  t.left = null; t.right = null; t.axis = null; t.threshold = null; t.isLeaf = true;
+  state.mode = 'normal';
+  state.splitTarget = null; state.ghostLeft = null; state.ghostRight = null;
+  updateUI();
+  renderAll();
+}
+
+function setSplitAxis(axis) {
+  if (state.mode !== 'split') return;
+  state.splitAxis = axis;
+  state.splitTarget.axis = axis;
+  const reg = getNodeRegion(state.splitTarget);
+  state.splitThreshold = axis === 'x' ? (reg.xMin+reg.xMax)/2 : (reg.yMin+reg.yMax)/2;
+  state.splitTarget.threshold = state.splitThreshold;
+  updateUI();
+  renderAll();
+}
+
+// ── Delete Leaf ──
+function deleteLeaf(leaf) {
+  if (!leaf.parent || state.mode === 'split') return;
+  const parent = leaf.parent;
+  const sibling = parent.left === leaf ? parent.right : parent.left;
+
+  // replace parent with sibling
+  if (parent.parent) {
+    if (parent.parent.left === parent) parent.parent.left = sibling;
+    else parent.parent.right = sibling;
+    sibling.parent = parent.parent;
+  } else {
+    // parent is root
+    state.tree = sibling;
+    sibling.parent = null;
+  }
+  delete nodeMap[leaf.id]; delete nodeMap[parent.id];
+  // fix nodeMap for sibling subtree
+  function fixParents(n) { if (!n) return; nodeMap[n.id] = n; fixParents(n.left); fixParents(n.right); }
+  fixParents(sibling);
+
+  renderAll();
+}
+
+// ── UI toggles ──
+function updateUI() {
+  document.getElementById('splitControls').style.display = state.mode === 'split' ? 'flex' : 'none';
+  document.getElementById('splitCostBar').style.display = state.mode === 'split' ? 'flex' : 'none';
+  document.getElementById('normalHint').style.display = state.mode === 'split' ? 'none' : '';
+
+  document.querySelectorAll('.classBtn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.class) === state.selectedClass);
+  });
+  document.querySelectorAll('.axisBtn').forEach(b => {
+    b.classList.toggle('active', b.id === 'axis'+state.splitAxis.toUpperCase()+'Btn');
+  });
+
+  canvas.style.cursor = state.mode === 'split' ? 'ew-resize' : 'crosshair';
+}
+
+// ── Event handlers ──
+// Class buttons
+document.querySelectorAll('.classBtn').forEach(b => {
+  b.style.background = CLASS_COLORS[parseInt(b.dataset.class)];
+  b.addEventListener('click', () => {
+    state.selectedClass = parseInt(b.dataset.class);
+    updateUI();
+  });
+});
+
+// Axis buttons
+document.getElementById('axisXBtn').addEventListener('click', () => setSplitAxis('x'));
+document.getElementById('axisYBtn').addEventListener('click', () => setSplitAxis('y'));
+document.getElementById('confirmBtn').addEventListener('click', confirmSplit);
+document.getElementById('cancelBtn').addEventListener('click', cancelSplit);
+document.getElementById('resetBtn').addEventListener('click', () => { initState(); renderAll(); });
+
+// Canvas interactions
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+  if (state.mode === 'normal') {
+    const [dx, dy] = canvasToData(mx, my);
+    if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1) {
+      state.dataPoints.push({ x: dx, y: dy, classIdx: state.selectedClass });
+      renderAll();
+    }
+  } else if (state.mode === 'split') {
+    state.isDragging = true;
+    handleDrag(mx, my);
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (state.mode === 'split' && state.isDragging) {
+    const rect = canvas.getBoundingClientRect();
+    handleDrag(e.clientX - rect.left, e.clientY - rect.top);
+  }
+});
+
+canvas.addEventListener('mouseup', () => { state.isDragging = false; });
+canvas.addEventListener('mouseleave', () => { state.isDragging = false; });
+
+function handleDrag(mx, my) {
+  const [dx, dy] = canvasToData(mx, my);
+  updateSplitThreshold(state.splitAxis === 'x' ? dx : dy);
+}
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (state.mode === 'split') {
+    if (e.key === 'Enter') confirmSplit();
+    if (e.key === 'Escape') cancelSplit();
+  }
+});
+
+// Resize
+window.addEventListener('resize', () => { resizeCanvas(); renderAll(); });
+new ResizeObserver(() => { resizeCanvas(); renderAll(); }).observe(canvas);
+
+// Init
+initState();
+resizeCanvas();
+renderAll();
+</script>
+</body>
+</html>
