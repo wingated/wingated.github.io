@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boosted Regression Tree Visualization</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; height: 100vh; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; background: #16213e; border-bottom: 1px solid #0f3460; }
+  .header h1 { font-size: 18px; color: #e94560; }
+
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls label { font-size: 13px; color: #a0a0c0; }
+  .controls input[type="number"] { width: 55px; padding: 4px 6px; background: #0f3460; border: 1px solid #e94560; color: #fff; border-radius: 4px; font-size: 13px; }
+  .controls select { padding: 4px 6px; background: #0f3460; border: 1px solid #e94560; color: #fff; border-radius: 4px; font-size: 13px; }
+
+  button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.2s; }
+  button:hover { opacity: 0.85; }
+  .btn-play { background: #4ecca3; color: #1a1a2e; }
+  .btn-stop { background: #e94560; color: #fff; }
+  .btn-reset { background: #e94560; color: #fff; }
+  .btn-reset-trees { background: #f5a623; color: #1a1a2e; }
+  .btn-data { background: #0f3460; color: #e0e0e0; border: 1px solid #4ecca3; }
+  .btn-step { background: #7b68ee; color: #fff; }
+
+  .sep { width: 1px; height: 24px; background: #0f3460; margin: 0 4px; }
+
+  .main { display: flex; height: calc(100vh - 45px); }
+  .pane { flex: 1; display: flex; flex-direction: column; position: relative; }
+  .pane-label { font-size: 13px; font-weight: 600; color: #a0a0c0; padding: 6px 12px; background: #16213e; border-bottom: 1px solid #0f3460; }
+  .pane:first-child { border-right: 2px solid #0f3460; }
+
+  canvas { flex: 1; display: block; cursor: crosshair; }
+
+  .right-pane-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  .tree-card { padding: 4px 8px; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
+  .tree-card-header { font-size: 12px; color: #4ecca3; margin-bottom: 2px; }
+  .tree-card canvas { cursor: default; height: 150px; width: 100%; }
+
+  .status { font-size: 12px; color: #f5a623; padding: 0 12px; }
+
+  .speed-control { display: flex; align-items: center; gap: 4px; }
+  .speed-control input[type="range"] { width: 60px; accent-color: #4ecca3; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Boosted Regression Trees</h1>
+  <div class="controls">
+    <label>Depth:</label>
+    <input type="number" id="maxDepth" value="2" min="1" max="6">
+    <label>Trees:</label>
+    <input type="number" id="numTrees" value="10" min="1" max="50">
+    <label>Rate:</label>
+    <input type="number" id="learnRate" value="0.3" min="0.01" max="1.0" step="0.05" style="width:60px">
+    <div class="sep"></div>
+    <div class="speed-control">
+      <label>Speed:</label>
+      <input type="range" id="speed" min="1" max="10" value="5">
+    </div>
+    <div class="sep"></div>
+    <button class="btn-play" id="btnPlay" onclick="togglePlay()">Play</button>
+    <button class="btn-step" onclick="stepOnce()">Step</button>
+    <button class="btn-reset-trees" onclick="resetTrees()">Reset Trees</button>
+    <button class="btn-reset" onclick="resetAll()">Reset All</button>
+    <div class="sep"></div>
+    <button class="btn-data" onclick="loadPreset('sine')">Sine</button>
+    <button class="btn-data" onclick="loadPreset('quadratic')">Quadratic</button>
+    <button class="btn-data" onclick="loadPreset('step')">Step</button>
+    <button class="btn-data" onclick="loadPreset('noisy')">Noisy</button>
+    <button class="btn-data" onclick="loadPreset('multi')">Multi-modal</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="pane">
+    <div class="pane-label">Data & Ensemble Prediction <span class="status" id="statusLeft"></span></div>
+    <canvas id="leftCanvas"></canvas>
+  </div>
+  <div class="pane">
+    <div class="pane-label">Individual Trees <span class="status" id="statusRight"></span></div>
+    <div class="right-pane-scroll" id="rightScroll"></div>
+  </div>
+</div>
+
+<script>
+// --- State ---
+let dataPoints = []; // {x, y}
+let trees = [];      // [{splits, predictions, weight}]
+let playing = false;
+let animTimer = null;
+let currentTreeIndex = 0;
+
+const leftCanvas = document.getElementById('leftCanvas');
+const leftCtx = leftCanvas.getContext('2d');
+const rightScroll = document.getElementById('rightScroll');
+
+// --- Canvas sizing ---
+function resize() {
+  const panes = document.querySelectorAll('.pane');
+  leftCanvas.width = panes[0].clientWidth;
+  leftCanvas.height = panes[0].clientHeight - 30;
+  drawLeft();
+  drawAllRight();
+}
+window.addEventListener('resize', resize);
+
+// --- Coordinate mapping ---
+const XMIN = 0, XMAX = 10, YMIN = -5, YMAX = 5;
+
+function toCanvasX(x, cw) { return ((x - XMIN) / (XMAX - XMIN)) * cw; }
+function toCanvasY(y, ch) { return ch - ((y - YMIN) / (YMAX - YMIN)) * ch; }
+function fromCanvasX(cx, cw) { return XMIN + (cx / cw) * (XMAX - XMIN); }
+function fromCanvasY(cy, ch) { return YMAX - (cy / ch) * (YMAX - YMIN); }
+
+// --- Drawing helpers ---
+function drawGrid(ctx, cw, ch) {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, cw, ch);
+
+  ctx.strokeStyle = '#2a2a4e';
+  ctx.lineWidth = 1;
+  for (let x = Math.ceil(XMIN); x <= XMAX; x++) {
+    const cx = toCanvasX(x, cw);
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, ch); ctx.stroke();
+  }
+  for (let y = Math.ceil(YMIN); y <= YMAX; y++) {
+    const cy = toCanvasY(y, ch);
+    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(cw, cy); ctx.stroke();
+  }
+
+  // axes
+  ctx.strokeStyle = '#4a4a6e';
+  ctx.lineWidth = 1.5;
+  const zeroY = toCanvasY(0, ch);
+  ctx.beginPath(); ctx.moveTo(0, zeroY); ctx.lineTo(cw, zeroY); ctx.stroke();
+
+  // axis labels
+  ctx.fillStyle = '#6a6a8e';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  for (let x = Math.ceil(XMIN); x <= XMAX; x++) {
+    ctx.fillText(x, toCanvasX(x, cw), zeroY + 12);
+  }
+  ctx.textAlign = 'right';
+  for (let y = Math.ceil(YMIN); y <= YMAX; y++) {
+    if (y === 0) continue;
+    ctx.fillText(y, 25, toCanvasY(y, ch) + 4);
+  }
+}
+
+function drawDataPoints(ctx, cw, ch, points, sizeArr) {
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const r = sizeArr ? Math.max(2, Math.min(12, sizeArr[i] * 6)) : 5;
+    const cx = toCanvasX(p.x, cw);
+    const cy = toCanvasY(p.y, ch);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(78, 204, 163, 0.8)';
+    ctx.fill();
+    ctx.strokeStyle = '#4ecca3';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function evalEnsemble(x) {
+  let val = 0;
+  for (const tree of trees) {
+    val += tree.weight * evalTree(tree, x);
+  }
+  return val;
+}
+
+function drawEnsembleCurve(ctx, cw, ch) {
+  if (trees.length === 0) return;
+  ctx.strokeStyle = '#e94560';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  const steps = cw;
+  for (let i = 0; i <= steps; i++) {
+    const x = fromCanvasX(i, cw);
+    const y = evalEnsemble(x);
+    const cy = toCanvasY(y, ch);
+    if (i === 0) ctx.moveTo(i, cy); else ctx.lineTo(i, cy);
+  }
+  ctx.stroke();
+}
+
+function drawLeft() {
+  const cw = leftCanvas.width, ch = leftCanvas.height;
+  drawGrid(leftCtx, cw, ch);
+  drawDataPoints(leftCtx, cw, ch, dataPoints, null);
+  drawEnsembleCurve(leftCtx, cw, ch);
+  document.getElementById('statusLeft').textContent = `${dataPoints.length} points, ${trees.length} trees`;
+}
+
+// --- Right pane: individual trees ---
+function drawAllRight() {
+  // Rebuild cards
+  rightScroll.innerHTML = '';
+  for (let i = 0; i < trees.length; i++) {
+    const card = document.createElement('div');
+    card.className = 'tree-card';
+    const header = document.createElement('div');
+    header.className = 'tree-card-header';
+    header.textContent = `Tree ${i + 1}  (weight: ${trees[i].weight.toFixed(3)})`;
+    card.appendChild(header);
+    const canvas = document.createElement('canvas');
+    canvas.width = rightScroll.clientWidth - 16 || 400;
+    canvas.height = 150;
+    card.appendChild(canvas);
+    rightScroll.appendChild(card);
+    drawTreeCard(canvas, trees[i], i);
+  }
+  // scroll to bottom
+  rightScroll.scrollTop = rightScroll.scrollHeight;
+}
+
+function drawTreeCard(canvas, tree, treeIndex) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.width, ch = canvas.height;
+  drawGrid(ctx, cw, ch);
+
+  // Draw data points with size = weight (absolute residual before this tree)
+  const weights = getWeightsForTree(treeIndex);
+  drawDataPoints(ctx, cw, ch, dataPoints, weights);
+
+  // Draw this tree's function
+  ctx.strokeStyle = '#f5a623';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const steps = cw;
+  for (let i = 0; i <= steps; i++) {
+    const x = fromCanvasX(i, cw);
+    const y = evalTree(tree, x);
+    const cy = toCanvasY(y, ch);
+    if (i === 0) ctx.moveTo(i, cy); else ctx.lineTo(i, cy);
+  }
+  ctx.stroke();
+}
+
+function getWeightsForTree(treeIndex) {
+  // Compute residuals just before this tree was fit
+  const residuals = dataPoints.map(p => {
+    let pred = 0;
+    for (let t = 0; t < treeIndex; t++) {
+      pred += trees[t].weight * evalTree(trees[t], p.x);
+    }
+    return Math.abs(p.y - pred);
+  });
+  // Normalize to [0, 1] for sizing
+  const maxR = Math.max(...residuals, 0.001);
+  return residuals.map(r => r / maxR);
+}
+
+// --- Decision Tree ---
+// Tree node: {splitX, left, right} or {value} (leaf)
+function buildTree(points, residuals, depth, maxDepth) {
+  if (depth >= maxDepth || points.length <= 1) {
+    // Leaf: mean of residuals
+    const mean = residuals.reduce((a, b) => a + b, 0) / (residuals.length || 1);
+    return { value: mean };
+  }
+
+  // Find best split
+  let bestSSE = Infinity, bestSplitX = null, bestLeftIdx = null, bestRightIdx = null;
+
+  // Sort by x
+  const indices = points.map((_, i) => i).sort((a, b) => points[a].x - points[b].x);
+
+  for (let s = 1; s < indices.length; s++) {
+    const splitX = (points[indices[s - 1]].x + points[indices[s]].x) / 2;
+    const leftIdx = indices.slice(0, s);
+    const rightIdx = indices.slice(s);
+
+    const leftMean = leftIdx.reduce((a, i) => a + residuals[i], 0) / leftIdx.length;
+    const rightMean = rightIdx.reduce((a, i) => a + residuals[i], 0) / rightIdx.length;
+
+    let sse = 0;
+    for (const i of leftIdx) sse += (residuals[i] - leftMean) ** 2;
+    for (const i of rightIdx) sse += (residuals[i] - rightMean) ** 2;
+
+    if (sse < bestSSE) {
+      bestSSE = sse;
+      bestSplitX = splitX;
+      bestLeftIdx = leftIdx;
+      bestRightIdx = rightIdx;
+    }
+  }
+
+  if (bestSplitX === null) {
+    const mean = residuals.reduce((a, b) => a + b, 0) / (residuals.length || 1);
+    return { value: mean };
+  }
+
+  const leftPoints = bestLeftIdx.map(i => points[i]);
+  const leftResiduals = bestLeftIdx.map(i => residuals[i]);
+  const rightPoints = bestRightIdx.map(i => points[i]);
+  const rightResiduals = bestRightIdx.map(i => residuals[i]);
+
+  return {
+    splitX: bestSplitX,
+    left: buildTree(leftPoints, leftResiduals, depth + 1, maxDepth),
+    right: buildTree(rightPoints, rightResiduals, depth + 1, maxDepth)
+  };
+}
+
+function evalTree(tree, x) {
+  let node = tree.root;
+  while (node.value === undefined) {
+    node = x < node.splitX ? node.left : node.right;
+  }
+  return node.value;
+}
+
+function fitNextTree() {
+  if (dataPoints.length < 2) return false;
+
+  const maxDepth = parseInt(document.getElementById('maxDepth').value) || 2;
+  const numTrees = parseInt(document.getElementById('numTrees').value) || 10;
+  const lr = parseFloat(document.getElementById('learnRate').value) || 0.3;
+
+  if (trees.length >= numTrees) return false;
+
+  // Compute residuals
+  const residuals = dataPoints.map(p => {
+    let pred = 0;
+    for (const tree of trees) {
+      pred += tree.weight * evalTree(tree, p.x);
+    }
+    return p.y - pred;
+  });
+
+  const root = buildTree(dataPoints, residuals, 0, maxDepth);
+  trees.push({ root, weight: lr });
+
+  drawLeft();
+  drawAllRight();
+  return trees.length < numTrees;
+}
+
+// --- Controls ---
+function togglePlay() {
+  if (playing) {
+    stopPlay();
+  } else {
+    startPlay();
+  }
+}
+
+function startPlay() {
+  if (dataPoints.length < 2) return;
+  playing = true;
+  document.getElementById('btnPlay').textContent = 'Stop';
+  document.getElementById('btnPlay').className = 'btn-stop';
+  scheduleNext();
+}
+
+function scheduleNext() {
+  if (!playing) return;
+  const speed = parseInt(document.getElementById('speed').value);
+  const delay = Math.max(50, 1100 - speed * 100);
+  animTimer = setTimeout(() => {
+    const more = fitNextTree();
+    if (more && playing) {
+      scheduleNext();
+    } else {
+      stopPlay();
+    }
+  }, delay);
+}
+
+function stopPlay() {
+  playing = false;
+  clearTimeout(animTimer);
+  document.getElementById('btnPlay').textContent = 'Play';
+  document.getElementById('btnPlay').className = 'btn-play';
+}
+
+function stepOnce() {
+  stopPlay();
+  fitNextTree();
+}
+
+function resetTrees() {
+  stopPlay();
+  trees = [];
+  drawLeft();
+  drawAllRight();
+}
+
+function resetAll() {
+  stopPlay();
+  trees = [];
+  dataPoints = [];
+  drawLeft();
+  drawAllRight();
+}
+
+// --- Click to add data ---
+leftCanvas.addEventListener('click', (e) => {
+  const rect = leftCanvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const x = fromCanvasX(cx, leftCanvas.width);
+  const y = fromCanvasY(cy, leftCanvas.height);
+  dataPoints.push({ x, y });
+  drawLeft();
+  drawAllRight(); // Update weights display
+});
+
+// --- Preset data ---
+function loadPreset(name) {
+  stopPlay();
+  trees = [];
+  dataPoints = [];
+
+  const n = 30;
+  switch (name) {
+    case 'sine':
+      for (let i = 0; i < n; i++) {
+        const x = XMIN + (XMAX - XMIN) * i / (n - 1);
+        dataPoints.push({ x, y: 2 * Math.sin(x) + (Math.random() - 0.5) * 0.5 });
+      }
+      break;
+    case 'quadratic':
+      for (let i = 0; i < n; i++) {
+        const x = XMIN + (XMAX - XMIN) * i / (n - 1);
+        dataPoints.push({ x, y: 0.15 * (x - 5) ** 2 - 2 + (Math.random() - 0.5) * 0.4 });
+      }
+      break;
+    case 'step':
+      for (let i = 0; i < n; i++) {
+        const x = XMIN + (XMAX - XMIN) * i / (n - 1);
+        const base = x < 3 ? -2 : x < 7 ? 1.5 : -1;
+        dataPoints.push({ x, y: base + (Math.random() - 0.5) * 0.4 });
+      }
+      break;
+    case 'noisy':
+      for (let i = 0; i < 40; i++) {
+        const x = XMIN + (XMAX - XMIN) * Math.random();
+        dataPoints.push({ x, y: Math.sin(x * 1.5) + 2 * Math.cos(x * 0.7) + (Math.random() - 0.5) * 1.5 });
+      }
+      break;
+    case 'multi':
+      for (let i = 0; i < 40; i++) {
+        const x = XMIN + (XMAX - XMIN) * Math.random();
+        const y = 2 * Math.sin(x) * Math.cos(x * 0.5) + 0.3 * (x - 5) + (Math.random() - 0.5) * 0.6;
+        dataPoints.push({ x, y });
+      }
+      break;
+  }
+
+  drawLeft();
+  drawAllRight();
+}
+
+// --- Init ---
+requestAnimationFrame(() => {
+  resize();
+  loadPreset('sine');
+});
+</script>
+</body>
+</html>
