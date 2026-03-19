@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boosted Classification Tree Visualization</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; overflow: hidden; height: 100vh; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; background: #16213e; border-bottom: 1px solid #0f3460; }
+  .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
+
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls label { font-size: 13px; color: #a0a0c0; }
+  .controls input[type="number"] { width: 55px; padding: 4px 6px; background: #0f3460; border: 1px solid #e94560; color: #fff; border-radius: 4px; font-size: 13px; }
+
+  button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.2s; }
+  button:hover { opacity: 0.85; }
+  .btn-play { background: #4ecca3; color: #1a1a2e; }
+  .btn-stop { background: #e94560; color: #fff; }
+  .btn-reset { background: #e94560; color: #fff; }
+  .btn-reset-trees { background: #f5a623; color: #1a1a2e; }
+  .btn-data { background: #0f3460; color: #e0e0e0; border: 1px solid #4ecca3; }
+  .btn-step { background: #7b68ee; color: #fff; }
+
+  .btn-class { padding: 5px 14px; border: 2px solid transparent; border-radius: 4px; font-weight: 700; font-size: 13px; cursor: pointer; }
+  .btn-class-0 { background: #e94560; color: #fff; }
+  .btn-class-1 { background: #4ecca3; color: #1a1a2e; }
+  .btn-class.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.4); }
+
+  .sep { width: 1px; height: 24px; background: #0f3460; margin: 0 4px; }
+
+  .main { display: flex; height: calc(100vh - 45px); }
+  .pane { flex: 1; display: flex; flex-direction: column; position: relative; }
+  .pane-label { font-size: 13px; font-weight: 600; color: #a0a0c0; padding: 6px 12px; background: #16213e; border-bottom: 1px solid #0f3460; display: flex; align-items: center; gap: 10px; }
+  .pane:first-child { border-right: 2px solid #0f3460; }
+
+  canvas { flex: 1; display: block; cursor: crosshair; }
+
+  .right-pane-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  .tree-card { padding: 4px 8px; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
+  .tree-card-header { font-size: 12px; color: #4ecca3; margin-bottom: 2px; }
+  .tree-card canvas { cursor: default; height: 200px; width: 100%; }
+
+  .status { font-size: 12px; color: #f5a623; }
+
+  .speed-control { display: flex; align-items: center; gap: 4px; }
+  .speed-control input[type="range"] { width: 60px; accent-color: #4ecca3; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Boosted Classification Trees</h1>
+  <div class="controls">
+    <label>Depth:</label>
+    <input type="number" id="maxDepth" value="2" min="1" max="6">
+    <label>Trees:</label>
+    <input type="number" id="numTrees" value="15" min="1" max="50">
+    <label>Rate:</label>
+    <input type="number" id="learnRate" value="0.5" min="0.01" max="2.0" step="0.05" style="width:60px">
+    <div class="sep"></div>
+    <div class="speed-control">
+      <label>Speed:</label>
+      <input type="range" id="speed" min="1" max="10" value="5">
+    </div>
+    <div class="sep"></div>
+    <button class="btn-play" id="btnPlay" onclick="togglePlay()">Play</button>
+    <button class="btn-step" onclick="stepOnce()">Step</button>
+    <button class="btn-reset-trees" onclick="resetTrees()">Reset Trees</button>
+    <button class="btn-reset" onclick="resetAll()">Reset All</button>
+    <div class="sep"></div>
+    <button class="btn-data" onclick="loadPreset('circles')">Circles</button>
+    <button class="btn-data" onclick="loadPreset('moons')">Moons</button>
+    <button class="btn-data" onclick="loadPreset('xor')">XOR</button>
+    <button class="btn-data" onclick="loadPreset('spiral')">Spiral</button>
+    <button class="btn-data" onclick="loadPreset('clusters')">Clusters</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="pane">
+    <div class="pane-label">
+      Data & Ensemble Decision Boundary
+      <span class="status" id="statusLeft"></span>
+      <span style="margin-left:auto; display:flex; gap:6px; align-items:center;">
+        <label style="font-size:12px; color:#a0a0c0;">Add class:</label>
+        <button class="btn-class btn-class-0 active" id="btnC0" onclick="setClass(0)">A</button>
+        <button class="btn-class btn-class-1" id="btnC1" onclick="setClass(1)">B</button>
+      </span>
+    </div>
+    <canvas id="leftCanvas"></canvas>
+  </div>
+  <div class="pane">
+    <div class="pane-label">Individual Trees <span class="status" id="statusRight"></span></div>
+    <div class="right-pane-scroll" id="rightScroll"></div>
+  </div>
+</div>
+
+<script>
+// --- State ---
+let dataPoints = []; // {x, y, cls: 0 or 1}
+let trees = [];      // [{root, alpha}]
+let sampleWeights = []; // AdaBoost sample weights
+let playing = false;
+let animTimer = null;
+let activeClass = 0;
+
+// Offscreen canvas for decision boundary rendering
+let boundaryCanvas = null;
+let boundaryCtx = null;
+const BOUNDARY_RES = 2; // pixel step for boundary computation
+
+const leftCanvas = document.getElementById('leftCanvas');
+const leftCtx = leftCanvas.getContext('2d');
+const rightScroll = document.getElementById('rightScroll');
+
+// --- Canvas sizing ---
+function resize() {
+  const panes = document.querySelectorAll('.pane');
+  leftCanvas.width = panes[0].clientWidth;
+  leftCanvas.height = panes[0].clientHeight - 34;
+  boundaryCanvas = document.createElement('canvas');
+  boundaryCanvas.width = Math.ceil(leftCanvas.width / BOUNDARY_RES);
+  boundaryCanvas.height = Math.ceil(leftCanvas.height / BOUNDARY_RES);
+  boundaryCtx = boundaryCanvas.getContext('2d');
+  drawLeft();
+  drawAllRight();
+}
+window.addEventListener('resize', resize);
+
+// --- Coordinate mapping (2D: x in [0,10], y in [0,10]) ---
+const XMIN = 0, XMAX = 10, YMIN = 0, YMAX = 10;
+
+function toCanvasX(x, cw) { return ((x - XMIN) / (XMAX - XMIN)) * cw; }
+function toCanvasY(y, ch) { return ch - ((y - YMIN) / (YMAX - YMIN)) * ch; }
+function fromCanvasX(cx, cw) { return XMIN + (cx / cw) * (XMAX - XMIN); }
+function fromCanvasY(cy, ch) { return YMAX - (cy / ch) * (YMAX - YMIN); }
+
+// --- Drawing helpers ---
+function drawGrid(ctx, cw, ch) {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.strokeStyle = '#2a2a4e';
+  ctx.lineWidth = 1;
+  for (let x = Math.ceil(XMIN); x <= XMAX; x++) {
+    const cx = toCanvasX(x, cw);
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, ch); ctx.stroke();
+  }
+  for (let y = Math.ceil(YMIN); y <= YMAX; y++) {
+    const cy = toCanvasY(y, ch);
+    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(cw, cy); ctx.stroke();
+  }
+  // axis labels
+  ctx.fillStyle = '#6a6a8e';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  for (let x = Math.ceil(XMIN); x <= XMAX; x++) {
+    ctx.fillText(x, toCanvasX(x, cw), ch - 4);
+  }
+  ctx.textAlign = 'right';
+  for (let y = Math.ceil(YMIN); y <= YMAX; y++) {
+    ctx.fillText(y, 22, toCanvasY(y, ch) + 4);
+  }
+}
+
+function drawPoint(ctx, cw, ch, p, radius) {
+  const cx = toCanvasX(p.x, cw);
+  const cy = toCanvasY(p.y, ch);
+  const r = radius || 5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (p.cls === 0) {
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.85)';
+    ctx.strokeStyle = '#e94560';
+  } else {
+    ctx.fillStyle = 'rgba(78, 204, 163, 0.85)';
+    ctx.strokeStyle = '#4ecca3';
+  }
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+// --- Ensemble evaluation ---
+// Returns raw score (positive => class 1, negative => class 0)
+function evalEnsemble(x, y) {
+  let score = 0;
+  for (const tree of trees) {
+    score += tree.alpha * evalTree(tree.root, x, y);
+  }
+  return score;
+}
+
+// Evaluate a single tree: returns +1 or -1
+function evalTree(node, x, y) {
+  if (node.label !== undefined) return node.label; // leaf: +1 or -1
+  if (node.axis === 0) {
+    return x < node.threshold ? evalTree(node.left, x, y) : evalTree(node.right, x, y);
+  } else {
+    return y < node.threshold ? evalTree(node.left, x, y) : evalTree(node.right, x, y);
+  }
+}
+
+// --- Decision boundary rendering ---
+function renderBoundary(ctx, cw, ch, evalFn) {
+  const bw = Math.ceil(cw / BOUNDARY_RES);
+  const bh = Math.ceil(ch / BOUNDARY_RES);
+  const imgData = ctx.createImageData(bw, bh);
+  const data = imgData.data;
+
+  for (let py = 0; py < bh; py++) {
+    for (let px = 0; px < bw; px++) {
+      const x = fromCanvasX(px * BOUNDARY_RES, cw);
+      const y = fromCanvasY(py * BOUNDARY_RES, ch);
+      const score = evalFn(x, y);
+      const confidence = Math.min(Math.abs(score), 3) / 3; // clamp
+      const alpha = 40 + confidence * 60;
+      const idx = (py * bw + px) * 4;
+      if (score > 0) {
+        // class 1: teal
+        data[idx] = 30; data[idx+1] = 140; data[idx+2] = 110; data[idx+3] = alpha;
+      } else {
+        // class 0: red
+        data[idx] = 180; data[idx+1] = 40; data[idx+2] = 60; data[idx+3] = alpha;
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function drawLeft() {
+  const cw = leftCanvas.width, ch = leftCanvas.height;
+  drawGrid(leftCtx, cw, ch);
+
+  // Draw decision boundary
+  if (trees.length > 0) {
+    renderBoundary(boundaryCtx, cw, ch, evalEnsemble);
+    leftCtx.imageSmoothingEnabled = true;
+    leftCtx.drawImage(boundaryCanvas, 0, 0, cw, ch);
+  }
+
+  // Draw data points
+  for (const p of dataPoints) drawPoint(leftCtx, cw, ch, p, 5);
+
+  document.getElementById('statusLeft').textContent = `${dataPoints.length} points, ${trees.length} trees`;
+}
+
+// --- Right pane: individual tree cards ---
+function drawAllRight() {
+  rightScroll.innerHTML = '';
+  for (let i = 0; i < trees.length; i++) {
+    const card = document.createElement('div');
+    card.className = 'tree-card';
+    const header = document.createElement('div');
+    header.className = 'tree-card-header';
+    header.textContent = `Tree ${i + 1}  (\u03B1 = ${trees[i].alpha.toFixed(4)}, err = ${trees[i].error.toFixed(4)})`;
+    card.appendChild(header);
+    const canvas = document.createElement('canvas');
+    canvas.width = rightScroll.clientWidth - 16 || 400;
+    canvas.height = 200;
+    card.appendChild(canvas);
+    rightScroll.appendChild(card);
+    drawTreeCard(canvas, trees[i], i);
+  }
+  rightScroll.scrollTop = rightScroll.scrollHeight;
+}
+
+function drawTreeCard(canvas, tree, treeIndex) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.width, ch = canvas.height;
+  drawGrid(ctx, cw, ch);
+
+  // Draw this tree's decision boundary
+  const bw = Math.ceil(cw / BOUNDARY_RES);
+  const bh = Math.ceil(ch / BOUNDARY_RES);
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = bw; tmpCanvas.height = bh;
+  const tmpCtx = tmpCanvas.getContext('2d');
+  renderBoundary(tmpCtx, cw, ch, (x, y) => evalTree(tree.root, x, y));
+  ctx.drawImage(tmpCanvas, 0, 0, cw, ch);
+
+  // Draw data points sized by their weight at this stage
+  const weights = tree.weightsSnapshot;
+  const maxW = Math.max(...weights, 1e-10);
+  for (let i = 0; i < dataPoints.length; i++) {
+    const r = Math.max(2, Math.min(14, (weights[i] / maxW) * 10));
+    drawPoint(ctx, cw, ch, dataPoints[i], r);
+  }
+}
+
+// --- Decision Tree (2D, binary classification) ---
+function buildClassTree(indices, depth, maxDepth, weights, labels, points) {
+  // Check if pure or max depth
+  if (depth >= maxDepth || indices.length <= 1) {
+    return makeLeaf(indices, weights, labels);
+  }
+
+  // Check purity
+  const cls0 = indices.some(i => labels[i] === -1);
+  const cls1 = indices.some(i => labels[i] === 1);
+  if (!cls0 || !cls1) return makeLeaf(indices, weights, labels);
+
+  let bestGain = -Infinity, bestAxis = 0, bestThresh = 0;
+  let bestLeftIdx = null, bestRightIdx = null;
+
+  const totalWeight = indices.reduce((s, i) => s + weights[i], 0);
+
+  for (let axis = 0; axis < 2; axis++) {
+    const sorted = [...indices].sort((a, b) => {
+      const va = axis === 0 ? points[a].x : points[a].y;
+      const vb = axis === 0 ? points[b].x : points[b].y;
+      return va - vb;
+    });
+
+    // Weighted error for parent
+    let parentPos = 0;
+    for (const i of indices) if (labels[i] === 1) parentPos += weights[i];
+    const parentNeg = totalWeight - parentPos;
+    const parentErr = Math.min(parentPos, parentNeg);
+
+    let leftPos = 0, leftNeg = 0;
+    for (let s = 0; s < sorted.length - 1; s++) {
+      const i = sorted[s];
+      if (labels[i] === 1) leftPos += weights[i]; else leftNeg += weights[i];
+      const rightPos = parentPos - leftPos;
+      const rightNeg = parentNeg - leftNeg;
+
+      const leftErr = Math.min(leftPos, leftNeg);
+      const rightErr = Math.min(rightPos, rightNeg);
+      const gain = parentErr - leftErr - rightErr;
+
+      const valCur = axis === 0 ? points[sorted[s]].x : points[sorted[s]].y;
+      const valNext = axis === 0 ? points[sorted[s+1]].x : points[sorted[s+1]].y;
+      if (valCur === valNext) continue;
+
+      if (gain > bestGain) {
+        bestGain = gain;
+        bestAxis = axis;
+        bestThresh = (valCur + valNext) / 2;
+        bestLeftIdx = sorted.slice(0, s + 1);
+        bestRightIdx = sorted.slice(s + 1);
+      }
+    }
+  }
+
+  if (bestLeftIdx === null || bestGain <= 0) {
+    return makeLeaf(indices, weights, labels);
+  }
+
+  return {
+    axis: bestAxis,
+    threshold: bestThresh,
+    left: buildClassTree(bestLeftIdx, depth + 1, maxDepth, weights, labels, points),
+    right: buildClassTree(bestRightIdx, depth + 1, maxDepth, weights, labels, points)
+  };
+}
+
+function makeLeaf(indices, weights, labels) {
+  let wPos = 0, wNeg = 0;
+  for (const i of indices) {
+    if (labels[i] === 1) wPos += weights[i]; else wNeg += weights[i];
+  }
+  return { label: wPos >= wNeg ? 1 : -1 };
+}
+
+// --- AdaBoost ---
+function fitNextTree() {
+  if (dataPoints.length < 2) return false;
+  const maxDepth = parseInt(document.getElementById('maxDepth').value) || 2;
+  const numTrees = parseInt(document.getElementById('numTrees').value) || 15;
+  const lr = parseFloat(document.getElementById('learnRate').value) || 0.5;
+
+  if (trees.length >= numTrees) return false;
+
+  const n = dataPoints.length;
+
+  // Initialize weights if first tree
+  if (sampleWeights.length !== n) {
+    sampleWeights = new Array(n).fill(1 / n);
+  }
+
+  // Labels: class 0 => -1, class 1 => +1
+  const labels = dataPoints.map(p => p.cls === 0 ? -1 : 1);
+  const indices = dataPoints.map((_, i) => i);
+
+  // Snapshot weights for visualization
+  const weightsSnapshot = [...sampleWeights];
+
+  // Build tree on weighted data
+  const root = buildClassTree(indices, 0, maxDepth, sampleWeights, labels, dataPoints);
+
+  // Compute weighted error
+  let err = 0;
+  const predictions = dataPoints.map((p, i) => evalTree(root, p.x, p.y));
+  for (let i = 0; i < n; i++) {
+    if (predictions[i] !== labels[i]) err += sampleWeights[i];
+  }
+
+  // Clamp error
+  err = Math.max(1e-10, Math.min(1 - 1e-10, err));
+
+  // Compute alpha (with learning rate)
+  const alpha = lr * 0.5 * Math.log((1 - err) / err);
+
+  // Update sample weights
+  for (let i = 0; i < n; i++) {
+    sampleWeights[i] *= Math.exp(-alpha * labels[i] * predictions[i]);
+  }
+  // Normalize
+  const wSum = sampleWeights.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < n; i++) sampleWeights[i] /= wSum;
+
+  trees.push({ root, alpha, error: err, weightsSnapshot });
+
+  drawLeft();
+  drawAllRight();
+  return trees.length < numTrees;
+}
+
+// --- Controls ---
+function setClass(c) {
+  activeClass = c;
+  document.getElementById('btnC0').classList.toggle('active', c === 0);
+  document.getElementById('btnC1').classList.toggle('active', c === 1);
+}
+
+function togglePlay() {
+  playing ? stopPlay() : startPlay();
+}
+
+function startPlay() {
+  if (dataPoints.length < 2) return;
+  playing = true;
+  document.getElementById('btnPlay').textContent = 'Stop';
+  document.getElementById('btnPlay').className = 'btn-stop';
+  scheduleNext();
+}
+
+function scheduleNext() {
+  if (!playing) return;
+  const speed = parseInt(document.getElementById('speed').value);
+  const delay = Math.max(50, 1100 - speed * 100);
+  animTimer = setTimeout(() => {
+    const more = fitNextTree();
+    if (more && playing) scheduleNext(); else stopPlay();
+  }, delay);
+}
+
+function stopPlay() {
+  playing = false;
+  clearTimeout(animTimer);
+  document.getElementById('btnPlay').textContent = 'Play';
+  document.getElementById('btnPlay').className = 'btn-play';
+}
+
+function stepOnce() { stopPlay(); fitNextTree(); }
+
+function resetTrees() {
+  stopPlay();
+  trees = [];
+  sampleWeights = [];
+  drawLeft();
+  drawAllRight();
+}
+
+function resetAll() {
+  stopPlay();
+  trees = [];
+  sampleWeights = [];
+  dataPoints = [];
+  drawLeft();
+  drawAllRight();
+}
+
+// --- Click to add data ---
+leftCanvas.addEventListener('click', (e) => {
+  const rect = leftCanvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const x = fromCanvasX(cx, leftCanvas.width);
+  const y = fromCanvasY(cy, leftCanvas.height);
+  dataPoints.push({ x, y, cls: activeClass });
+  drawLeft();
+});
+
+// --- Preset data ---
+function loadPreset(name) {
+  stopPlay();
+  trees = [];
+  sampleWeights = [];
+  dataPoints = [];
+
+  switch (name) {
+    case 'circles': {
+      const n = 60;
+      for (let i = 0; i < n; i++) {
+        const angle = (2 * Math.PI * i) / (n / 2);
+        if (i < n / 2) {
+          const r = 2 + (Math.random() - 0.5) * 0.6;
+          dataPoints.push({ x: 5 + r * Math.cos(angle), y: 5 + r * Math.sin(angle), cls: 0 });
+        } else {
+          const r = 4 + (Math.random() - 0.5) * 0.6;
+          dataPoints.push({ x: 5 + r * Math.cos(angle), y: 5 + r * Math.sin(angle), cls: 1 });
+        }
+      }
+      break;
+    }
+    case 'moons': {
+      const n = 40;
+      for (let i = 0; i < n; i++) {
+        const angle = (Math.PI * i) / n;
+        const noise = () => (Math.random() - 0.5) * 0.5;
+        dataPoints.push({ x: 3 + 2.5 * Math.cos(angle) + noise(), y: 4 + 2.5 * Math.sin(angle) + noise(), cls: 0 });
+        dataPoints.push({ x: 5 + 2.5 * Math.cos(angle + Math.PI) + noise(), y: 6 + 2.5 * Math.sin(angle + Math.PI) + noise(), cls: 1 });
+      }
+      break;
+    }
+    case 'xor': {
+      const n = 15;
+      for (let i = 0; i < n; i++) {
+        dataPoints.push({ x: 2 + Math.random() * 2.5, y: 2 + Math.random() * 2.5, cls: 0 });
+        dataPoints.push({ x: 5.5 + Math.random() * 2.5, y: 5.5 + Math.random() * 2.5, cls: 0 });
+        dataPoints.push({ x: 2 + Math.random() * 2.5, y: 5.5 + Math.random() * 2.5, cls: 1 });
+        dataPoints.push({ x: 5.5 + Math.random() * 2.5, y: 2 + Math.random() * 2.5, cls: 1 });
+      }
+      break;
+    }
+    case 'spiral': {
+      const n = 50;
+      for (let i = 0; i < n; i++) {
+        const t = (i / n) * 2 * Math.PI;
+        const r = 0.5 + 3.5 * (i / n);
+        const noise = () => (Math.random() - 0.5) * 0.4;
+        dataPoints.push({ x: 5 + r * Math.cos(t) + noise(), y: 5 + r * Math.sin(t) + noise(), cls: 0 });
+        dataPoints.push({ x: 5 - r * Math.cos(t) + noise(), y: 5 - r * Math.sin(t) + noise(), cls: 1 });
+      }
+      break;
+    }
+    case 'clusters': {
+      const centers = [
+        { x: 3, y: 3, cls: 0 }, { x: 7, y: 7, cls: 0 },
+        { x: 3, y: 7, cls: 1 }, { x: 7, y: 3, cls: 1 }, { x: 5, y: 5, cls: 1 }
+      ];
+      for (const c of centers) {
+        for (let i = 0; i < 12; i++) {
+          dataPoints.push({
+            x: c.x + (Math.random() - 0.5) * 2,
+            y: c.y + (Math.random() - 0.5) * 2,
+            cls: c.cls
+          });
+        }
+      }
+      break;
+    }
+  }
+
+  drawLeft();
+  drawAllRight();
+}
+
+// --- Init ---
+requestAnimationFrame(() => {
+  resize();
+  loadPreset('moons');
+});
+</script>
+</body>
+</html>
