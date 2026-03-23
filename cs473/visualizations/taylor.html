@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XGBoost: Second-Order Taylor Expansion Visualizer</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0f1e;--surface:#111827;--surface2:#1a2236;--border:#253049;
+  --text:#e2e8f0;--text-dim:#8892a8;--text-muted:#5a6478;
+  --blue:#60a5fa;--red:#f87171;--purple:#c084fc;--green:#34d399;
+  --gold:#fbbf24;--orange:#fb923c;--cyan:#22d3ee;
+  --blue-dim:rgba(96,165,250,0.15);--red-dim:rgba(248,113,113,0.12);
+  --purple-dim:rgba(192,132,252,0.12);--green-dim:rgba(52,211,153,0.12);
+  --gold-dim:rgba(251,191,36,0.12);
+  --radius:10px;--radius-sm:6px;
+}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden}
+a{color:var(--blue)}
+
+/* ── Layout ── */
+.app{display:grid;grid-template-columns:1fr 380px;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}
+header{grid-column:1/-1;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px}
+header h1{font-size:1.1rem;font-weight:700;color:#fff;white-space:nowrap}
+header .sep{width:1px;height:24px;background:var(--border)}
+header .subtitle{font-size:0.82rem;color:var(--text-dim)}
+.main-col{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.side-col{overflow-y:auto;border-left:1px solid var(--border);background:var(--surface)}
+
+/* ── Canvas area ── */
+.canvas-wrap{flex:1;position:relative;background:var(--bg);min-height:0}
+.canvas-wrap canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair}
+.canvas-tooltip{position:absolute;pointer-events:none;background:rgba(10,15,30,0.92);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;font-size:0.78rem;color:var(--text);backdrop-filter:blur(8px);display:none;white-space:nowrap;z-index:10}
+
+/* ── Formula bar ── */
+.formula-bar{padding:16px 24px;background:var(--surface);border-top:1px solid var(--border);font-family:'SF Mono','Fira Code','Cascadia Code',monospace}
+.formula-bar .fb-row{display:flex;flex-wrap:wrap;gap:20px;align-items:baseline;margin-bottom:6px}
+.formula-bar .fb-row:last-child{margin-bottom:0}
+.fb-label{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted)}
+.fb-value{font-size:0.95rem;font-weight:600}
+.fb-value.c-purple{color:var(--purple)}.fb-value.c-green{color:var(--green)}.fb-value.c-gold{color:var(--gold)}.fb-value.c-red{color:var(--red)}.fb-value.c-blue{color:var(--blue)}
+.fb-formula{font-size:0.88rem;color:var(--red);line-height:1.8}
+.fb-newton{font-size:0.85rem;color:var(--text-dim);line-height:1.8}
+.fb-newton b{color:var(--gold);font-weight:600}
+
+/* ── Sidebar ── */
+.panel{padding:16px 18px;border-bottom:1px solid var(--border)}
+.panel-hd{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.panel-hd .icon{font-size:0.85rem}
+
+/* Function picker */
+.func-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.func-btn{padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);font-size:0.78rem;color:var(--text-dim);cursor:pointer;transition:all 0.2s;text-align:center;font-weight:500}
+.func-btn:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-dim)}
+.func-btn.active{border-color:var(--blue);color:#fff;background:var(--blue);box-shadow:0 0 16px rgba(96,165,250,0.25)}
+
+/* Sliders */
+.slider-row{margin-bottom:12px}
+.slider-head{display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:4px}
+.slider-head span:first-child{color:var(--text-dim)}
+.slider-head .sv{color:var(--text);font-weight:600;font-family:'SF Mono',monospace;font-size:0.78rem}
+input[type=range]{-webkit-appearance:none;width:100%;height:6px;border-radius:3px;background:var(--border);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid var(--surface);box-shadow:0 0 8px rgba(96,165,250,0.4)}
+
+/* Toggles */
+.toggle-list{display:flex;flex-direction:column;gap:2px}
+.tog{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;user-select:none;font-size:0.82rem;color:var(--text-dim);transition:background 0.15s}
+.tog:hover{background:var(--surface2)}
+.tog input{display:none}
+.tog-check{width:16px;height:16px;border-radius:4px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;transition:all 0.15s;flex-shrink:0}
+.tog input:checked ~ .tog-check{border-color:var(--blue);background:var(--blue)}
+.tog input:checked ~ .tog-check::after{content:'';display:block;width:6px;height:6px;border-radius:2px;background:#fff}
+.tog .cdot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.tog input:checked ~ .tog-label{color:var(--text)}
+.tog-label{transition:color 0.15s}
+
+/* Decomposition bars */
+.decomp{padding:16px 18px;border-bottom:1px solid var(--border)}
+.decomp-title{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:12px}
+.decomp-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:0.78rem}
+.decomp-label{width:90px;color:var(--text-dim);flex-shrink:0;text-align:right}
+.decomp-bar-wrap{flex:1;height:20px;background:var(--surface2);border-radius:4px;position:relative;overflow:hidden}
+.decomp-bar{height:100%;border-radius:4px;transition:width 0.3s ease;min-width:2px;position:absolute;left:50%}
+.decomp-val{width:65px;font-family:'SF Mono',monospace;font-weight:600;font-size:0.76rem;text-align:right;flex-shrink:0}
+.decomp-zero{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--text-muted);opacity:0.3}
+.decomp-sum{display:flex;align-items:center;gap:8px;font-size:0.78rem;padding-top:8px;border-top:1px solid var(--border);margin-top:4px}
+.decomp-sum .decomp-label{font-weight:600;color:var(--text)}
+
+/* Annotation */
+.note-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;font-size:0.82rem;color:var(--text-dim);line-height:1.7}
+.note-box .note-title{font-weight:600;color:var(--text);margin-bottom:4px;font-size:0.85rem}
+.note-box .xgb{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-style:italic;color:var(--text-muted)}
+.note-box .eq{display:block;margin:8px 0;padding:8px 12px;background:var(--bg);border-radius:var(--radius-sm);font-family:'SF Mono',monospace;font-size:0.82rem;color:var(--green);text-align:center}
+.note-box .key-insight{display:block;margin-top:10px;padding:10px 12px;background:var(--gold-dim);border-left:3px solid var(--gold);border-radius:0 var(--radius-sm) var(--radius-sm) 0;color:var(--gold);font-style:normal;font-size:0.8rem}
+
+/* Tutorial overlay */
+.tutorial-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity 0.3s}
+.tutorial-overlay.visible{opacity:1;pointer-events:all}
+.tutorial-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:560px;width:90%;box-shadow:0 24px 64px rgba(0,0,0,0.5)}
+.tutorial-card h2{font-size:1.2rem;margin-bottom:8px;color:#fff}
+.tutorial-card p{font-size:0.9rem;color:var(--text-dim);margin-bottom:16px;line-height:1.7}
+.tutorial-card .tc-eq{display:block;margin:12px 0;padding:12px 16px;background:var(--bg);border-radius:var(--radius);font-family:'SF Mono',monospace;font-size:0.95rem;color:var(--green);text-align:center;border:1px solid var(--border)}
+.tutorial-card .tc-steps{margin:16px 0}
+.tutorial-card .tc-step{display:flex;gap:12px;margin-bottom:12px;font-size:0.85rem;color:var(--text-dim)}
+.tutorial-card .tc-num{width:24px;height:24px;border-radius:50%;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;flex-shrink:0}
+.tutorial-card .tc-btns{display:flex;gap:10px;margin-top:20px}
+.tc-btn{padding:10px 24px;border:none;border-radius:var(--radius);font-size:0.85rem;font-weight:600;cursor:pointer;transition:all 0.2s}
+.tc-btn.primary{background:var(--blue);color:#fff}
+.tc-btn.primary:hover{background:#3b82f6;box-shadow:0 0 20px rgba(96,165,250,0.3)}
+.tc-btn.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border)}
+.tc-btn.ghost:hover{border-color:var(--text-dim)}
+.tutorial-dots{display:flex;gap:6px;justify-content:center;margin-top:16px}
+.tutorial-dots .dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:all 0.2s}
+.tutorial-dots .dot.active{background:var(--blue);box-shadow:0 0 8px rgba(96,165,250,0.4)}
+
+/* Keyboard hint bar */
+.kb-bar{grid-column:1/-1;padding:6px 24px;background:var(--surface);border-top:1px solid var(--border);display:flex;gap:16px;font-size:0.72rem;color:var(--text-muted)}
+.kb-bar kbd{display:inline-block;padding:1px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;font-family:inherit;color:var(--text-dim);font-size:0.7rem}
+
+/* Animate button */
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:0.82rem;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;width:100%}
+.btn:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-dim)}
+.btn:disabled{opacity:0.4;cursor:default;border-color:var(--border);color:var(--text-muted);background:var(--surface2)}
+.btn-row{display:flex;gap:6px}
+.btn-row .btn{flex:1}
+
+@media(max-width:960px){
+  .app{grid-template-columns:1fr;grid-template-rows:auto 50vh 1fr auto}
+  .side-col{border-left:none;border-top:1px solid var(--border)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Taylor Expansion Explorer</h1>
+    <div class="sep"></div>
+    <div class="subtitle">Interactive second-order approximation — the engine inside XGBoost</div>
+  </header>
+
+  <div class="main-col">
+    <div class="canvas-wrap">
+      <canvas id="plot"></canvas>
+      <div class="canvas-tooltip" id="tooltip"></div>
+    </div>
+    <div class="formula-bar" id="formula-bar"></div>
+  </div>
+
+  <div class="side-col">
+    <!-- Functions -->
+    <div class="panel">
+      <div class="panel-hd">Functions</div>
+      <div class="func-grid" id="func-btns"></div>
+    </div>
+
+    <!-- Expansion point -->
+    <div class="panel">
+      <div class="panel-hd">Expansion Point</div>
+      <div class="slider-row">
+        <div class="slider-head"><span>a (drag on plot or use slider)</span><span class="sv" id="a-val">0.00</span></div>
+        <input type="range" id="a-slider" min="-5" max="5" step="0.01" value="0">
+      </div>
+      <div class="slider-row">
+        <div class="slider-head"><span>Zoom (x-range)</span><span class="sv" id="zoom-val">&pm;5.0</span></div>
+        <input type="range" id="zoom-slider" min="1" max="12" step="0.1" value="5">
+      </div>
+    </div>
+
+    <!-- Term decomposition -->
+    <div class="decomp" id="decomp">
+      <div class="decomp-title">Term Decomposition at x = a</div>
+      <div id="decomp-bars"></div>
+    </div>
+
+    <!-- Display toggles -->
+    <div class="panel">
+      <div class="panel-hd">Display Layers</div>
+      <div class="toggle-list">
+        <label class="tog"><input type="checkbox" id="chk-constant" checked><span class="tog-check"></span><span class="cdot" style="background:var(--purple)"></span><span class="tog-label">Constant term f(a)</span></label>
+        <label class="tog"><input type="checkbox" id="chk-linear" checked><span class="tog-check"></span><span class="cdot" style="background:var(--green)"></span><span class="tog-label">Tangent line (1st order)</span></label>
+        <label class="tog"><input type="checkbox" id="chk-newton" checked><span class="tog-check"></span><span class="cdot" style="background:var(--gold)"></span><span class="tog-label">Newton step minimum</span></label>
+        <label class="tog"><input type="checkbox" id="chk-error"><span class="tog-check"></span><span class="cdot" style="background:rgba(248,113,113,0.5)"></span><span class="tog-label">Approximation error</span></label>
+        <label class="tog"><input type="checkbox" id="chk-deriv"><span class="tog-check"></span><span class="cdot" style="background:var(--cyan)"></span><span class="tog-label">f'(x) and f''(x) curves</span></label>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="panel">
+      <div class="btn-row">
+        <button class="btn" id="btn-animate">Animate Build-Up</button>
+        <button class="btn" id="btn-tutorial">Tutorial</button>
+      </div>
+    </div>
+
+    <!-- XGBoost note -->
+    <div class="panel">
+      <div class="panel-hd">XGBoost Connection</div>
+      <div class="note-box" id="annotation"></div>
+    </div>
+  </div>
+
+  <div class="kb-bar">
+    <span><kbd>Click</kbd> / <kbd>Drag</kbd> on plot to move expansion point</span>
+    <span><kbd>1</kbd>-<kbd>6</kbd> switch functions</span>
+    <span><kbd>?</kbd> tutorial</span>
+    <span><kbd>A</kbd> animate</span>
+    <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> nudge point</span>
+  </div>
+</div>
+
+<!-- Tutorial -->
+<div class="tutorial-overlay" id="tutorial-overlay">
+  <div class="tutorial-card" id="tutorial-card"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════
+const C = {
+  original:'#60a5fa', taylor:'#f87171', constant:'#c084fc', linear:'#34d399',
+  newton:'#fbbf24', grid:'#1a2236', axis:'#334155', errFill:'rgba(248,113,113,0.1)',
+  bg:'#0a0f1e', text:'#94a3b8', textHi:'#e2e8f0', newtonLbl:'#fde68a',
+  deriv1:'#22d3ee', deriv2:'#fb923c',
+};
+const PAD = {top:24,right:24,bottom:40,left:56};
+const N = 800; // sample count
+
+// ═══════════════════════════════════════════
+//  FUNCTION REGISTRY
+// ═══════════════════════════════════════════
+const FUNCS = {
+  quadratic:{
+    name:'x\u00b2', nameL:'Quadratic',
+    f:x=>x*x, df:x=>2*x, ddf:()=>2,
+    dom:[-5,5], a0:1.5,
+    desc:'The Taylor expansion of a quadratic is <b>exact</b> everywhere \u2014 the red curve lies perfectly on the blue one. This is the ideal case.',
+    xgb:'When the loss is exactly quadratic, one Newton step finds the global minimum. XGBoost works best when the loss is "close to quadratic" near the current prediction.',
+    insight:null,
+  },
+  cubic:{
+    name:'x\u00b3\u22123x', nameL:'Cubic',
+    f:x=>x*x*x-3*x, df:x=>3*x*x-3, ddf:x=>6*x,
+    dom:[-3,3], a0:1.0,
+    desc:'A cubic with local extrema. The quadratic approximation curves the wrong way on one side. Try placing <b>a</b> at the inflection point x=0 \u2014 the Hessian vanishes.',
+    xgb:'Higher-order terms make the Newton step overshoot. This is why XGBoost uses a <b>learning rate</b> (shrinkage) \u2014 to take cautious steps.',
+    insight:'Try a = 0: f\'\'(0) = 0 means no curvature info \u2014 the quadratic degenerates to a line. XGBoost adds regularization (\u03bb) to the Hessian to prevent division by zero.',
+  },
+  quartic:{
+    name:'x\u2074\u22124x\u00b2+1', nameL:'Double Well',
+    f:x=>x**4-4*x*x+1, df:x=>4*x**3-8*x, ddf:x=>12*x*x-8,
+    dom:[-3,3], a0:0.5,
+    desc:'Two minima, one local max. The approximation quality varies <b>dramatically</b> depending on the expansion point. Try different positions.',
+    xgb:'Multiple minima show why XGBoost builds trees greedily \u2014 each local quadratic model guides one step at a time, not the whole path.',
+    insight:'At a = 0, f\'\'(0) = \u22128 < 0: the region is concave. The quadratic approximation has a maximum, not a minimum \u2014 the Newton step would go the wrong way!',
+  },
+  logloss1:{
+    name:'LogLoss y=1', nameL:'Log-Loss (y=1)',
+    f:x=>-Math.log(1/(1+Math.exp(-x))),
+    df:x=>-(1-1/(1+Math.exp(-x))),
+    ddf:x=>{const s=1/(1+Math.exp(-x));return s*(1-s)},
+    dom:[-6,6], a0:0.5,
+    desc:'The actual loss XGBoost minimizes for binary classification when y=1. The input x is the raw logit (log-odds), and the loss is \u2212log \u03c3(x).',
+    xgb:'<b>g = \u03c3(a) \u2212 1 = p \u2212 1</b> (gradient, negative residual)<br><b>h = p(1\u2212p)</b> (Hessian, curvature of the loss)<br>The Newton leaf value is <b>\u2212g/h</b>.',
+    insight:'At a=0: p=0.5, g=\u22120.5, h=0.25. The Newton step \u2212g/h = 2.0 pushes the logit strongly positive (toward predicting y=1). As p\u21921, g\u21920 and the step shrinks \u2014 the model is already confident.',
+  },
+  logloss0:{
+    name:'LogLoss y=0', nameL:'Log-Loss (y=0)',
+    f:x=>-Math.log(1-1/(1+Math.exp(-x))),
+    df:x=>1/(1+Math.exp(-x)),
+    ddf:x=>{const s=1/(1+Math.exp(-x));return s*(1-s)},
+    dom:[-6,6], a0:-0.5,
+    desc:'Log-loss for y=0. The gradient pushes the logit toward \u2212\u221e (low predicted probability).',
+    xgb:'<b>g = \u03c3(a) = p</b> (gradient: positive, pushes prediction down)<br><b>h = p(1\u2212p)</b> (same Hessian as y=1 \u2014 curvature depends only on p, not y).',
+    insight:'The Hessian h = p(1\u2212p) is maximized at p=0.5 and drops toward 0 as p\u21920 or p\u21921. Near the extremes, the loss is nearly linear \u2014 the quadratic model is less informative.',
+  },
+  bumpy:{
+    name:'sin+quad', nameL:'sin(2x) + 0.3x\u00b2',
+    f:x=>Math.sin(2*x)+0.3*x*x,
+    df:x=>2*Math.cos(2*x)+0.6*x,
+    ddf:x=>-4*Math.sin(2*x)+0.6,
+    dom:[-5,5], a0:1.0,
+    desc:'A bumpy function with multiple local features. Drag the point to see how the approximation quality changes rapidly across the domain.',
+    xgb:'This illustrates why XGBoost uses many small trees (boosting rounds) rather than one big Newton step \u2014 the local quadratic model is only trustworthy nearby.',
+    insight:'Notice regions where f\'\'(x) < 0 (the Hessian flips sign). The quadratic approximation opens downward there \u2014 it has a maximum, not a minimum.',
+  },
+};
+const FKEYS = Object.keys(FUNCS);
+
+// ═══════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════
+const S = {
+  func:'quadratic', a:1.5,
+  xR:[-5,5], yR:[-2,10],
+  show:{constant:true,linear:true,newton:true,error:false,deriv:false},
+  drag:false, animStep:-1,
+  hover:null, // {x,y} world coords when hovering
+};
+
+// ═══════════════════════════════════════════
+//  DOM
+// ═══════════════════════════════════════════
+const canvas = document.getElementById('plot');
+const ctx = canvas.getContext('2d');
+const $tip = document.getElementById('tooltip');
+const $fb = document.getElementById('formula-bar');
+const $ann = document.getElementById('annotation');
+const $aSlider = document.getElementById('a-slider');
+const $aVal = document.getElementById('a-val');
+const $zSlider = document.getElementById('zoom-slider');
+const $zVal = document.getElementById('zoom-val');
+const $btnAnim = document.getElementById('btn-animate');
+const $btnTut = document.getElementById('btn-tutorial');
+const $tutOverlay = document.getElementById('tutorial-overlay');
+const $tutCard = document.getElementById('tutorial-card');
+
+let dpr=1, cw=0, ch=0;
+function setupCanvas(){
+  dpr=window.devicePixelRatio||1;
+  const r=canvas.parentElement.getBoundingClientRect();
+  cw=r.width; ch=r.height;
+  canvas.width=cw*dpr; canvas.height=ch*dpr;
+  canvas.style.width=cw+'px'; canvas.style.height=ch+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+// ═══════════════════════════════════════════
+//  MATH
+// ═══════════════════════════════════════════
+function pW(){return cw-PAD.left-PAD.right}
+function pH(){return ch-PAD.top-PAD.bottom}
+function w2x(wx){return PAD.left+(wx-S.xR[0])/(S.xR[1]-S.xR[0])*pW()}
+function w2y(wy){return PAD.top+(S.yR[1]-wy)/(S.yR[1]-S.yR[0])*pH()}
+function c2w(cx){return S.xR[0]+(cx-PAD.left)/pW()*(S.xR[1]-S.xR[0])}
+function c2wy(cy){return S.yR[1]-(cy-PAD.top)/pH()*(S.yR[1]-S.yR[0])}
+
+function taylorAt(x){
+  const fn=FUNCS[S.func],a=S.a,d=x-a;
+  return fn.f(a)+fn.df(a)*d+0.5*fn.ddf(a)*d*d;
+}
+function newtonMin(){
+  const fn=FUNCS[S.func],a=S.a,h=fn.ddf(a);
+  if(Math.abs(h)<1e-10)return null;
+  const xs=a-fn.df(a)/h;
+  return{x:xs,y:taylorAt(xs),concave:h<0};
+}
+function computeYRange(){
+  const fn=FUNCS[S.func];const[a,b]=S.xR;
+  let lo=Infinity,hi=-Infinity;
+  for(let i=0;i<=N;i++){
+    const x=a+(b-a)*i/N, y=fn.f(x);
+    if(isFinite(y)){lo=Math.min(lo,y);hi=Math.max(hi,y)}
+  }
+  if(hi-lo<0.5){lo-=1;hi+=1}
+  const p=(hi-lo)*0.15;
+  S.yR=[lo-p,hi+p];
+}
+function sample(fn,a,b){
+  const pts=[];
+  for(let i=0;i<=N;i++){const x=a+(b-a)*i/N;pts.push({x,y:fn(x)})}
+  return pts;
+}
+
+// ═══════════════════════════════════════════
+//  DRAWING
+// ═══════════════════════════════════════════
+function polyline(pts,color,w,dash){
+  ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=w;ctx.setLineDash(dash||[]);
+  let on=false;
+  for(const p of pts){
+    const cx=w2x(p.x),cy=w2y(p.y);
+    if(!isFinite(p.y)||cy<-600||cy>ch+600){on=false;continue}
+    if(!on){ctx.moveTo(cx,cy);on=true}else ctx.lineTo(cx,cy);
+  }
+  ctx.stroke();ctx.setLineDash([]);
+}
+
+function niceStep(range){
+  const r=range/8,m=Math.pow(10,Math.floor(Math.log10(r))),n=r/m;
+  if(n<1.5)return m;if(n<3.5)return 2*m;if(n<7.5)return 5*m;return 10*m;
+}
+
+function drawGrid(){
+  const[xA,xB]=S.xR,[yA,yB]=S.yR;
+  const xs=niceStep(xB-xA),ys=niceStep(yB-yA);
+  ctx.strokeStyle=C.grid;ctx.lineWidth=0.5;
+  ctx.fillStyle=C.text;ctx.font='11px system-ui,sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='top';
+  for(let x=Math.ceil(xA/xs)*xs;x<=xB;x+=xs){
+    const cx=w2x(x);
+    ctx.beginPath();ctx.moveTo(cx,PAD.top);ctx.lineTo(cx,ch-PAD.bottom);ctx.stroke();
+    ctx.fillText(+x.toFixed(6)+'',cx,ch-PAD.bottom+8);
+  }
+  ctx.textAlign='right';ctx.textBaseline='middle';
+  for(let y=Math.ceil(yA/ys)*ys;y<=yB;y+=ys){
+    const cy=w2y(y);
+    ctx.beginPath();ctx.moveTo(PAD.left,cy);ctx.lineTo(cw-PAD.right,cy);ctx.stroke();
+    ctx.fillText(+y.toFixed(6)+'',PAD.left-8,cy);
+  }
+  // axes
+  ctx.strokeStyle=C.axis;ctx.lineWidth=1;
+  if(yA<=0&&yB>=0){const cy=w2y(0);ctx.beginPath();ctx.moveTo(PAD.left,cy);ctx.lineTo(cw-PAD.right,cy);ctx.stroke()}
+  if(xA<=0&&xB>=0){const cx=w2x(0);ctx.beginPath();ctx.moveTo(cx,PAD.top);ctx.lineTo(cx,ch-PAD.bottom);ctx.stroke()}
+}
+
+function drawErrorFill(){
+  const fn=FUNCS[S.func];const[a,b]=S.xR;
+  ctx.fillStyle=C.errFill;ctx.beginPath();
+  for(let i=0;i<=N;i++){const x=a+(b-a)*i/N;const cx=w2x(x),cy=w2y(fn.f(x));if(i===0)ctx.moveTo(cx,cy);else ctx.lineTo(cx,cy)}
+  for(let i=N;i>=0;i--){const x=a+(b-a)*i/N;ctx.lineTo(w2x(x),w2y(taylorAt(x)))}
+  ctx.closePath();ctx.fill();
+}
+
+function drawDerivCurves(){
+  const fn=FUNCS[S.func];const[a,b]=S.xR;
+  // f'(x)
+  polyline(sample(fn.df,a,b),C.deriv1,1.2,[4,4]);
+  // f''(x)
+  polyline(sample(fn.ddf,a,b),C.deriv2,1.2,[2,3]);
+
+  // labels on right edge
+  const rx=b-0.02*(b-a);
+  const y1=fn.df(rx), y2=fn.ddf(rx);
+  ctx.font='bold 10px system-ui';
+  ctx.textAlign='right';ctx.textBaseline='bottom';
+  ctx.fillStyle=C.deriv1;ctx.fillText("f'(x)",w2x(rx)-4,w2y(y1)-4);
+  ctx.fillStyle=C.deriv2;ctx.fillText("f''(x)",w2x(rx)-4,w2y(y2)-4);
+}
+
+function drawMarker(wx,wy,radius,fill,stroke){
+  const cx=w2x(wx),cy=w2y(wy);
+  ctx.beginPath();ctx.arc(cx,cy,radius,0,Math.PI*2);
+  ctx.fillStyle=fill;ctx.fill();
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}
+}
+
+function drawDiamond(wx,wy,s,fill){
+  const cx=w2x(wx),cy=w2y(wy);
+  ctx.beginPath();ctx.moveTo(cx,cy-s);ctx.lineTo(cx+s,cy);ctx.lineTo(cx,cy+s);ctx.lineTo(cx-s,cy);ctx.closePath();
+  ctx.fillStyle=fill;ctx.fill();ctx.strokeStyle=C.bg;ctx.lineWidth=2;ctx.stroke();
+}
+
+function drawVDash(wx,y1,y2,color){
+  const cx=w2x(wx);
+  ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=1;ctx.setLineDash([3,3]);
+  ctx.moveTo(cx,w2y(y1));ctx.lineTo(cx,w2y(y2));ctx.stroke();ctx.setLineDash([]);
+}
+
+// ── Main draw ──
+function draw(){
+  const fn=FUNCS[S.func];const[xA,xB]=S.xR;const a=S.a;
+  const anim=S.animStep>=0;
+
+  ctx.clearRect(0,0,cw,ch);
+  ctx.fillStyle=C.bg;ctx.fillRect(0,0,cw,ch);
+  ctx.save();ctx.beginPath();ctx.rect(PAD.left,PAD.top,pW(),pH());ctx.clip();
+
+  drawGrid();
+
+  // error fill
+  if(S.show.error&&(!anim||S.animStep>=3))drawErrorFill();
+
+  // derivative curves
+  if(S.show.deriv&&(!anim||S.animStep>=3))drawDerivCurves();
+
+  // constant term
+  if(S.show.constant&&(!anim||S.animStep>=1)){
+    polyline([{x:xA,y:fn.f(a)},{x:xB,y:fn.f(a)}],C.constant,1.5,[6,4]);
+  }
+
+  // tangent line
+  if(S.show.linear&&(!anim||S.animStep>=2)){
+    polyline(sample(x=>fn.f(a)+fn.df(a)*(x-a),xA,xB),C.linear,1.5,[6,4]);
+  }
+
+  // original function — BOLD
+  if(!anim||S.animStep>=0){
+    // glow
+    ctx.save();ctx.shadowColor=C.original;ctx.shadowBlur=8;
+    polyline(sample(fn.f,xA,xB),C.original,3,[]);
+    ctx.restore();
+  }
+
+  // Taylor approximation
+  if(!anim||S.animStep>=3){
+    ctx.save();ctx.shadowColor=C.taylor;ctx.shadowBlur=6;
+    polyline(sample(taylorAt,xA,xB),C.taylor,2.5,[]);
+    ctx.restore();
+  }
+
+  // expansion point
+  if(!anim||S.animStep>=1){
+    drawVDash(a,0,fn.f(a),C.taylor);
+    drawMarker(a,fn.f(a),7,C.taylor,C.bg);
+    ctx.fillStyle=C.textHi;ctx.font='bold 11px system-ui';ctx.textAlign='left';ctx.textBaseline='bottom';
+    ctx.fillText(`a = ${a.toFixed(2)}`,w2x(a)+12,w2y(fn.f(a))-10);
+    ctx.fillStyle=C.text;ctx.font='11px system-ui';
+    ctx.fillText(`f(a) = ${fn.f(a).toFixed(3)}`,w2x(a)+12,w2y(fn.f(a))+4);
+  }
+
+  // Newton minimum
+  if(S.show.newton&&(!anim||S.animStep>=4)){
+    const nm=newtonMin();
+    if(nm&&isFinite(nm.x)&&nm.x>=xA&&nm.x<=xB){
+      drawVDash(nm.x,0,nm.y,C.newton);
+      drawDiamond(nm.x,nm.y,8,C.newton);
+      ctx.fillStyle=C.newtonLbl;ctx.font='bold 11px system-ui';
+      ctx.textAlign=nm.x>a?'left':'right';ctx.textBaseline='top';
+      const lx=nm.x>a?w2x(nm.x)+12:w2x(nm.x)-12;
+      if(nm.concave){
+        ctx.fillText('maximum (f\u2033<0)',lx,w2y(nm.y)+12);
+      } else {
+        ctx.fillText(`x* = ${nm.x.toFixed(2)}`,lx,w2y(nm.y)+12);
+        ctx.fillStyle=C.text;ctx.font='10px system-ui';
+        ctx.fillText(`T(x*) = ${nm.y.toFixed(3)}`,lx,w2y(nm.y)+26);
+      }
+    }
+  }
+
+  // hover probe
+  if(S.hover&&!S.drag){
+    const hx=S.hover.x;
+    if(hx>=xA&&hx<=xB){
+      const fy=fn.f(hx),ty=taylorAt(hx);
+      // vertical line at hover
+      ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;
+      ctx.setLineDash([2,2]);
+      ctx.moveTo(w2x(hx),PAD.top);ctx.lineTo(w2x(hx),ch-PAD.bottom);
+      ctx.stroke();ctx.setLineDash([]);
+      // dots on both curves
+      drawMarker(hx,fy,4,C.original,null);
+      if(!anim||S.animStep>=3)drawMarker(hx,ty,4,C.taylor,null);
+    }
+  }
+
+  ctx.restore();
+
+  updateFormulaBar();
+  updateDecomp();
+  updateAnnotation();
+  updateTooltip();
+}
+
+// ═══════════════════════════════════════════
+//  FORMULA BAR
+// ═══════════════════════════════════════════
+function fmt(v,d=3){return v.toFixed(d)}
+function updateFormulaBar(){
+  const fn=FUNCS[S.func],a=S.a;
+  const fa=fn.f(a),g=fn.df(a),h=fn.ddf(a);
+  const nm=newtonMin();
+  let nStr='';
+  if(!nm||!isFinite(nm.x)){
+    nStr=`<span class="fb-newton">Newton step: f\u2033(a) \u2248 0 — inflection point, no quadratic extremum</span>`;
+  } else if(nm.concave){
+    nStr=`<span class="fb-newton">Newton step: f\u2033(a) < 0 — concave region, quadratic has a <b style="color:var(--red)">maximum</b>. XGBoost adds regularization \u03bb to handle this.</span>`;
+  } else {
+    nStr=`<span class="fb-newton">Newton step: x* = a \u2212 g/h = ${fmt(a)} \u2212 ${fmt(g)}/${fmt(h)} = <b>${fmt(nm.x)}</b> &nbsp; T(x*) = <b>${fmt(nm.y)}</b></span>`;
+  }
+  $fb.innerHTML=
+    `<div class="fb-row">
+      <div><span class="fb-label">at a = ${fmt(a)}</span></div>
+      <div><span class="fb-label">f(a) = </span><span class="fb-value c-purple">${fmt(fa)}</span></div>
+      <div><span class="fb-label">g = f\u2032(a) = </span><span class="fb-value c-green">${fmt(g)}</span></div>
+      <div><span class="fb-label">h = f\u2033(a) = </span><span class="fb-value c-gold">${fmt(h)}</span></div>
+    </div>
+    <div class="fb-row">
+      <span class="fb-formula">T(x) = <span class="c-purple">${fmt(fa)}</span> + <span class="c-green">${fmt(g)}</span>\u00b7(x\u2212${fmt(a,2)}) + <span class="c-gold">${fmt(0.5*h)}</span>\u00b7(x\u2212${fmt(a,2)})\u00b2</span>
+    </div>
+    <div class="fb-row">${nStr}</div>`;
+}
+
+// ═══════════════════════════════════════════
+//  TERM DECOMPOSITION BARS
+// ═══════════════════════════════════════════
+function updateDecomp(){
+  const fn=FUNCS[S.func],a=S.a;
+  const fa=fn.f(a), g=fn.df(a), h=fn.ddf(a);
+  // We show decomposition at a probe point. Use hover if available, else a+0.5
+  const px = S.hover ? S.hover.x : a + 0.5;
+  const d = px - a;
+  const t0 = fa;
+  const t1 = g * d;
+  const t2 = 0.5 * h * d * d;
+  const total = t0 + t1 + t2;
+  const maxAbs = Math.max(Math.abs(t0),Math.abs(t1),Math.abs(t2),0.01);
+
+  function bar(label, val, color){
+    const pct = Math.min(Math.abs(val)/maxAbs*45,48);
+    const dir = val>=0?'right':'left';
+    const transform = val>=0?`left:50%;width:${pct}%`:`right:50%;width:${pct}%;left:auto`;
+    return `<div class="decomp-row">
+      <div class="decomp-label">${label}</div>
+      <div class="decomp-bar-wrap"><div class="decomp-zero"></div><div class="decomp-bar" style="${transform};background:${color}"></div></div>
+      <div class="decomp-val" style="color:${color}">${val>=0?'+':''}${val.toFixed(3)}</div>
+    </div>`;
+  }
+
+  const probeLabel = S.hover ? `x = ${px.toFixed(2)}` : `x = a+0.5`;
+  document.getElementById('decomp-bars').innerHTML=
+    `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px">Evaluating at ${probeLabel}, \u0394 = ${d.toFixed(2)}</div>`+
+    bar('f(a)',t0,C.constant)+
+    bar("f\u2032(a)\u00b7\u0394",t1,C.linear)+
+    bar('\u00bdf\u2033(a)\u00b7\u0394\u00b2',t2,C.newton)+
+    `<div class="decomp-sum">
+      <div class="decomp-label">\u03a3 = T(x)</div>
+      <div style="flex:1"></div>
+      <div class="decomp-val" style="color:var(--red)">${total>=0?'+':''}${total.toFixed(3)}</div>
+    </div>
+    <div class="decomp-row" style="margin-top:4px">
+      <div class="decomp-label" style="color:var(--text-muted)">f(x) actual</div>
+      <div style="flex:1"></div>
+      <div class="decomp-val" style="color:var(--blue)">${fn.f(px).toFixed(3)}</div>
+    </div>
+    <div class="decomp-row">
+      <div class="decomp-label" style="color:var(--text-muted)">error</div>
+      <div style="flex:1"></div>
+      <div class="decomp-val" style="color:var(--text-dim)">${(total-fn.f(px)).toFixed(4)}</div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════
+//  ANNOTATION
+// ═══════════════════════════════════════════
+function updateAnnotation(){
+  const fn=FUNCS[S.func];
+  const eq='L(y, \u0177+\u03b4) \u2248 L(y,\u0177) + g\u00b7\u03b4 + \u00bdh\u00b7\u03b4\u00b2 &nbsp;\u2192&nbsp; \u03b4* = \u2212g/h';
+  let html=`<div class="note-title">${fn.nameL}</div>`;
+  html+=`<div>${fn.desc}</div>`;
+  html+=`<span class="eq">${eq}</span>`;
+  html+=`<div class="xgb">${fn.xgb}</div>`;
+  if(fn.insight) html+=`<span class="key-insight">${fn.insight}</span>`;
+  $ann.innerHTML=html;
+}
+
+// ═══════════════════════════════════════════
+//  TOOLTIP (hover)
+// ═══════════════════════════════════════════
+function updateTooltip(){
+  if(!S.hover||S.drag){$tip.style.display='none';return}
+  const fn=FUNCS[S.func],hx=S.hover.x;
+  if(hx<S.xR[0]||hx>S.xR[1]){$tip.style.display='none';return}
+  const fy=fn.f(hx),ty=taylorAt(hx),err=ty-fy;
+  $tip.style.display='block';
+  $tip.innerHTML=`<span style="color:${C.original}">f(${hx.toFixed(2)}) = ${fy.toFixed(3)}</span><br><span style="color:${C.taylor}">T(${hx.toFixed(2)}) = ${ty.toFixed(3)}</span><br><span style="color:var(--text-muted)">err = ${err>=0?'+':''}${err.toFixed(4)}</span>`;
+  let tx=w2x(hx)+16, ty2=w2y(fy)-20;
+  if(tx+160>cw)tx=w2x(hx)-170;
+  if(ty2<10)ty2=10;
+  $tip.style.left=tx+'px';$tip.style.top=ty2+'px';
+}
+
+// ═══════════════════════════════════════════
+//  FUNCTION BUTTONS
+// ═══════════════════════════════════════════
+function buildButtons(){
+  const el=document.getElementById('func-btns');el.innerHTML='';
+  FKEYS.forEach((k,i)=>{
+    const b=document.createElement('button');
+    b.className='func-btn'+(k===S.func?' active':'');
+    b.innerHTML=`<span style="font-size:0.7rem;color:var(--text-muted)">${i+1}</span> ${FUNCS[k].name}`;
+    b.onclick=()=>selectFunc(k);
+    el.appendChild(b);
+  });
+}
+function selectFunc(key){
+  S.func=key;S.a=FUNCS[key].a0;
+  const half=parseFloat($zSlider.value);
+  S.xR=[-half,half];
+  $aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2);
+  S.animStep=-1;
+  computeYRange();buildButtons();draw();
+}
+
+// ═══════════════════════════════════════════
+//  EVENT HANDLERS
+// ═══════════════════════════════════════════
+$aSlider.oninput=function(){
+  S.a=parseFloat(this.value);$aVal.textContent=S.a.toFixed(2);S.animStep=-1;draw();
+};
+$zSlider.oninput=function(){
+  const h=parseFloat(this.value);S.xR=[-h,h];$zVal.textContent=`\u00b1${h.toFixed(1)}`;
+  $aSlider.min=-h;$aSlider.max=h;
+  if(S.a<-h){S.a=-h;$aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2)}
+  if(S.a>h){S.a=h;$aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2)}
+  S.animStep=-1;computeYRange();draw();
+};
+
+function ptrDown(e){e.preventDefault();S.drag=true;ptrUpdate(e)}
+function ptrMove(e){
+  const rect=canvas.getBoundingClientRect();
+  const px=(e.touches?e.touches[0].clientX:e.clientX)-rect.left;
+  const py=(e.touches?e.touches[0].clientY:e.clientY)-rect.top;
+  S.hover={x:c2w(px),y:c2wy(py)};
+  if(S.drag){e.preventDefault();ptrUpdate(e)}else{draw()}
+}
+function ptrUp(){S.drag=false}
+function ptrUpdate(e){
+  const rect=canvas.getBoundingClientRect();
+  const px=(e.touches?e.touches[0].clientX:e.clientX)-rect.left;
+  let wx=c2w(px);wx=Math.max(S.xR[0],Math.min(S.xR[1],wx));
+  S.a=Math.round(wx*100)/100;$aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2);
+  S.animStep=-1;draw();
+}
+function ptrLeave(){S.hover=null;$tip.style.display='none';draw()}
+
+canvas.addEventListener('mousedown',ptrDown);
+canvas.addEventListener('mousemove',ptrMove);
+canvas.addEventListener('mouseleave',ptrLeave);
+window.addEventListener('mouseup',ptrUp);
+canvas.addEventListener('touchstart',ptrDown,{passive:false});
+canvas.addEventListener('touchmove',ptrMove,{passive:false});
+window.addEventListener('touchend',ptrUp);
+
+// checkboxes
+['constant','linear','newton','error','deriv'].forEach(k=>{
+  document.getElementById('chk-'+k).onchange=function(){S.show[k]=this.checked;draw()};
+});
+
+// keyboard shortcuts
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  const k=e.key;
+  if(k>='1'&&k<='6'){const i=parseInt(k)-1;if(FKEYS[i])selectFunc(FKEYS[i])}
+  if(k==='?')showTutorial();
+  if(k==='a'||k==='A'){$btnAnim.click()}
+  if(k==='ArrowLeft'){S.a=Math.max(S.xR[0],S.a-0.1);$aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2);S.animStep=-1;draw()}
+  if(k==='ArrowRight'){S.a=Math.min(S.xR[1],S.a+0.1);$aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2);S.animStep=-1;draw()}
+});
+
+// animate
+$btnAnim.onclick=function(){
+  if(S.animStep>=0)return;
+  $btnAnim.disabled=true;S.animStep=0;draw();
+  let step=1;
+  const iv=setInterval(()=>{S.animStep=step;draw();step++;if(step>4){clearInterval(iv);S.animStep=-1;$btnAnim.disabled=false;draw()}},800);
+};
+
+// resize
+let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{setupCanvas();computeYRange();draw()},60)});
+
+// ═══════════════════════════════════════════
+//  TUTORIAL
+// ═══════════════════════════════════════════
+const TUTORIAL_PAGES = [
+  {
+    title:'What is a Taylor Expansion?',
+    body:`<p>A Taylor expansion approximates a complicated function with a simpler polynomial near a chosen point <b>a</b>.</p>
+    <p>The <b>second-order</b> expansion uses three pieces of information about f at the point a:</p>
+    <div class="tc-steps">
+      <div class="tc-step"><div class="tc-num" style="background:var(--purple)">1</div><div><b>f(a)</b> — the function value (where are we?)</div></div>
+      <div class="tc-step"><div class="tc-num" style="background:var(--green)">2</div><div><b>f\u2032(a)</b> — the first derivative (which way is downhill?)</div></div>
+      <div class="tc-step"><div class="tc-num" style="background:var(--gold)">3</div><div><b>f\u2033(a)</b> — the second derivative (how curved is it?)</div></div>
+    </div>
+    <div class="tc-eq">T(x) = f(a) + f\u2032(a)\u00b7(x\u2212a) + \u00bdf\u2033(a)\u00b7(x\u2212a)\u00b2</div>`,
+  },
+  {
+    title:'Why Second Order?',
+    body:`<p>A <b>first-order</b> (linear) approximation gives you the tangent line — it tells you which direction is "downhill" but not how far to go.</p>
+    <p>The <b>second-order</b> (quadratic) approximation adds curvature information. This lets us find the <b>minimum</b> of the parabola:</p>
+    <div class="tc-eq">x* = a \u2212 f\u2032(a) / f\u2033(a)</div>
+    <p>This is the <b>Newton-Raphson step</b> — it tells us both the direction AND the optimal step size.</p>
+    <p>Toggle "Tangent line" on and compare the green dashed line (1st order) with the red curve (2nd order) to see the difference.</p>`,
+  },
+  {
+    title:'The XGBoost Connection',
+    body:`<p>XGBoost builds decision trees that minimize a loss function. At each leaf, it needs to find the optimal prediction adjustment \u03b4.</p>
+    <p>Instead of solving this exactly (expensive!), XGBoost approximates the loss with a second-order Taylor expansion:</p>
+    <div class="tc-eq">L(y, \u0177+\u03b4) \u2248 L(y,\u0177) + g\u00b7\u03b4 + \u00bdh\u00b7\u03b4\u00b2</div>
+    <p>where <b style="color:var(--green)">g = \u2202L/\u2202\u0177</b> (gradient) and <b style="color:var(--gold)">h = \u2202\u00b2L/\u2202\u0177\u00b2</b> (Hessian).</p>
+    <p>The optimal leaf value is then simply: <b>\u03b4* = \u2212g/h</b></p>
+    <p>Try the <b>Log-Loss</b> functions to see exactly the gradients and Hessians XGBoost computes!</p>`,
+  },
+  {
+    title:'How to Use This Tool',
+    body:`<p>You're ready to explore! Here are some things to try:</p>
+    <div class="tc-steps">
+      <div class="tc-step"><div class="tc-num">1</div><div><b>Drag</b> on the plot to move the expansion point and watch the approximation update in real time</div></div>
+      <div class="tc-step"><div class="tc-num">2</div><div><b>Hover</b> over the plot to see f(x) vs T(x) at any point and the error</div></div>
+      <div class="tc-step"><div class="tc-num">3</div><div>Switch functions with the buttons or <kbd>1</kbd>-<kbd>6</kbd> keys</div></div>
+      <div class="tc-step"><div class="tc-num">4</div><div>Toggle layers to see each term individually</div></div>
+      <div class="tc-step"><div class="tc-num">5</div><div>Click <b>Animate Build-Up</b> to see the approximation constructed step by step</div></div>
+      <div class="tc-step"><div class="tc-num">6</div><div>Enable <b>f\u2032(x) and f\u2033(x)</b> to visualize the derivative curves</div></div>
+    </div>
+    <p style="margin-top:12px;color:var(--text-muted)">Press <kbd>?</kbd> anytime to reopen this tutorial.</p>`,
+  },
+];
+
+let tutPage=0;
+function showTutorial(){tutPage=0;renderTutPage();$tutOverlay.classList.add('visible')}
+function hideTutorial(){$tutOverlay.classList.remove('visible')}
+function renderTutPage(){
+  const p=TUTORIAL_PAGES[tutPage];
+  const dots=TUTORIAL_PAGES.map((_,i)=>`<div class="dot${i===tutPage?' active':''}"></div>`).join('');
+  $tutCard.innerHTML=`<h2>${p.title}</h2>${p.body}<div class="tutorial-dots">${dots}</div><div class="tc-btns">${
+    tutPage>0?'<button class="tc-btn ghost" onclick="tutPrev()">Back</button>':''
+  }${tutPage<TUTORIAL_PAGES.length-1?
+    '<button class="tc-btn primary" onclick="tutNext()">Next</button>':
+    '<button class="tc-btn primary" onclick="hideTutorial()">Start Exploring</button>'
+  }<button class="tc-btn ghost" onclick="hideTutorial()">Skip</button></div>`;
+}
+window.tutPrev=function(){tutPage=Math.max(0,tutPage-1);renderTutPage()};
+window.tutNext=function(){tutPage=Math.min(TUTORIAL_PAGES.length-1,tutPage+1);renderTutPage()};
+$tutOverlay.addEventListener('click',e=>{if(e.target===$tutOverlay)hideTutorial()});
+$btnTut.onclick=showTutorial;
+
+// ═══════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════
+function init(){
+  setupCanvas();
+  buildButtons();
+  const h=parseFloat($zSlider.value);
+  $aSlider.min=-h;$aSlider.max=h;$aSlider.value=S.a;$aVal.textContent=S.a.toFixed(2);
+  computeYRange();draw();
+  // show tutorial on first visit
+  if(!localStorage.getItem('taylor_tut_seen')){
+    showTutorial();
+    localStorage.setItem('taylor_tut_seen','1');
+  }
+}
+document.addEventListener('DOMContentLoaded',init);
+</script>
+</body>
+</html>
