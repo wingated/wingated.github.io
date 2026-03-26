@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Label Propagation Visualizer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    padding: 10px 20px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; font-weight: 600; color: #e94560; white-space: nowrap; }
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .ctrl-group { display: flex; align-items: center; gap: 6px; }
+  .ctrl-group label { font-size: 12px; color: #aaa; white-space: nowrap; }
+  .ctrl-group input[type=range] { width: 100px; accent-color: #e94560; }
+  .ctrl-group .val { font-size: 12px; color: #e94560; min-width: 28px; text-align: right; }
+  button {
+    background: #0f3460; border: 1px solid #e94560; color: #e0e0e0;
+    padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+    transition: background .15s;
+  }
+  button:hover { background: #e94560; color: #fff; }
+  button.primary { background: #e94560; color: #fff; font-weight: 600; }
+  button.primary:hover { background: #c7354e; }
+  .main { display: flex; flex: 1; min-height: 0; }
+  .pane { flex: 1; position: relative; display: flex; flex-direction: column; }
+  .pane-header {
+    padding: 6px 12px; font-size: 13px; font-weight: 600;
+    background: #16213e; border-bottom: 1px solid #0f3460;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .divider { width: 1px; background: #0f3460; }
+  canvas { flex: 1; display: block; }
+  #dataCanvas { cursor: crosshair; }
+  .legend {
+    position: absolute; bottom: 8px; left: 8px;
+    background: rgba(22,33,62,0.9); padding: 6px 10px; border-radius: 4px;
+    font-size: 11px; display: flex; gap: 12px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; border: 1px solid #555;
+  }
+  .mode-indicator {
+    font-size: 11px; color: #e94560; padding: 2px 8px;
+    border: 1px solid #e94560; border-radius: 3px;
+  }
+  .tooltip {
+    position: absolute; background: rgba(22,33,62,0.95); color: #e0e0e0;
+    padding: 4px 8px; border-radius: 4px; font-size: 11px; pointer-events: none;
+    border: 1px solid #0f3460; display: none; z-index: 10;
+  }
+  .preset-btns { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Label Propagation</h1>
+  <div class="controls">
+    <div class="ctrl-group">
+      <label>Temp (T):</label>
+      <input type="range" id="tempSlider" min="0.01" max="5" step="0.01" value="1.0">
+      <span class="val" id="tempVal">1.00</span>
+    </div>
+    <div class="ctrl-group">
+      <label>k-NN:</label>
+      <input type="range" id="kSlider" min="1" max="20" step="1" value="5">
+      <span class="val" id="kVal">5</span>
+    </div>
+    <div class="ctrl-group">
+      <label>Place:</label>
+      <button id="modePos" class="primary">+ Positive</button>
+      <button id="modeNeg">- Negative</button>
+      <button id="modeUnl">? Unlabeled</button>
+    </div>
+    <button id="stepBtn" class="primary">Step &rarr;</button>
+    <button id="toggleDisplay">Show: Soft</button>
+    <button id="resetLabels">Reset Labels</button>
+    <button id="resetAll">Clear All</button>
+    <div class="preset-btns">
+      <button id="presetTwo">Two Clusters</button>
+      <button id="presetMoons">Moons</button>
+      <button id="presetSpiral">Spiral</button>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="pane" id="matrixPane">
+    <div class="pane-header">
+      <span>Transition Matrix (column-normalized)</span>
+      <span id="matSize" style="font-size:11px;color:#888;"></span>
+    </div>
+    <canvas id="matrixCanvas"></canvas>
+    <div class="tooltip" id="matTooltip"></div>
+  </div>
+  <div class="divider"></div>
+  <div class="pane" id="dataPane">
+    <div class="pane-header">
+      <span>Data Points</span>
+      <span class="mode-indicator" id="modeLabel">Placing: Positive</span>
+    </div>
+    <canvas id="dataCanvas"></canvas>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#fff;"></div>Positive (+1)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#000;"></div>Negative (-1)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#808080;"></div>Unlabeled</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// --- State ---
+let points = []; // {x, y, label: 1|-1|0, score: null}
+let placementMode = 1; // 1, -1, 0
+let hardDisplay = false; // false = soft (grayscale), true = hard (argmax)
+let T = 1.0;
+let K = 5;
+let transitionMatrix = null; // column-normalized
+let rawWeights = null;
+
+const matCanvas = document.getElementById('matrixCanvas');
+const matCtx = matCanvas.getContext('2d');
+const dataCanvas = document.getElementById('dataCanvas');
+const dataCtx = dataCanvas.getContext('2d');
+const matTooltip = document.getElementById('matTooltip');
+
+// --- Resize ---
+function resize() {
+  for (const c of [matCanvas, dataCanvas]) {
+    const r = c.parentElement.getBoundingClientRect();
+    const h = r.height - c.parentElement.querySelector('.pane-header').offsetHeight;
+    c.width = r.width * devicePixelRatio;
+    c.height = h * devicePixelRatio;
+    c.style.width = r.width + 'px';
+    c.style.height = h + 'px';
+  }
+  render();
+}
+window.addEventListener('resize', resize);
+
+// --- Controls ---
+const tempSlider = document.getElementById('tempSlider');
+const kSlider = document.getElementById('kSlider');
+tempSlider.addEventListener('input', () => {
+  T = parseFloat(tempSlider.value);
+  document.getElementById('tempVal').textContent = T.toFixed(2);
+  recompute(); render();
+});
+kSlider.addEventListener('input', () => {
+  K = parseInt(kSlider.value);
+  document.getElementById('kVal').textContent = K;
+  recompute(); render();
+});
+
+function setMode(m) {
+  placementMode = m;
+  document.getElementById('modePos').className = m === 1 ? 'primary' : '';
+  document.getElementById('modeNeg').className = m === -1 ? 'primary' : '';
+  document.getElementById('modeUnl').className = m === 0 ? 'primary' : '';
+  const labels = {1: 'Placing: Positive', '-1': 'Placing: Negative', 0: 'Placing: Unlabeled'};
+  document.getElementById('modeLabel').textContent = labels[m];
+}
+document.getElementById('modePos').onclick = () => setMode(1);
+document.getElementById('modeNeg').onclick = () => setMode(-1);
+document.getElementById('modeUnl').onclick = () => setMode(0);
+
+document.getElementById('toggleDisplay').onclick = () => {
+  hardDisplay = !hardDisplay;
+  document.getElementById('toggleDisplay').textContent = hardDisplay ? 'Show: Hard' : 'Show: Soft';
+  render();
+};
+document.getElementById('stepBtn').onclick = stepPropagation;
+document.getElementById('resetLabels').onclick = () => {
+  points.forEach(p => p.score = null);
+  render();
+};
+document.getElementById('resetAll').onclick = () => {
+  points = []; transitionMatrix = null; rawWeights = null;
+  render();
+};
+
+// --- Data canvas interaction ---
+dataCanvas.addEventListener('click', (e) => {
+  const rect = dataCanvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  points.push({ x, y, label: placementMode, score: null });
+  recompute(); render();
+});
+
+// Drag support
+let dragging = null;
+dataCanvas.addEventListener('mousedown', (e) => {
+  const rect = dataCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top) / rect.height;
+  const idx = findPoint(mx, my, rect);
+  if (idx >= 0) { dragging = idx; e.preventDefault(); }
+});
+dataCanvas.addEventListener('mousemove', (e) => {
+  if (dragging === null) return;
+  const rect = dataCanvas.getBoundingClientRect();
+  points[dragging].x = (e.clientX - rect.left) / rect.width;
+  points[dragging].y = (e.clientY - rect.top) / rect.height;
+  recompute(); render();
+});
+dataCanvas.addEventListener('mouseup', () => { dragging = null; });
+
+// Right-click to delete
+dataCanvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const rect = dataCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top) / rect.height;
+  const idx = findPoint(mx, my, rect);
+  if (idx >= 0) {
+    points.splice(idx, 1);
+    recompute(); render();
+  }
+});
+
+function findPoint(mx, my, rect) {
+  const r = 12 / rect.width;
+  for (let i = points.length - 1; i >= 0; i--) {
+    const dx = points[i].x - mx, dy = points[i].y - my;
+    if (Math.sqrt(dx*dx + dy*dy) < r) return i;
+  }
+  return -1;
+}
+
+// --- Matrix tooltip ---
+matCanvas.addEventListener('mousemove', (e) => {
+  if (!transitionMatrix || points.length === 0) { matTooltip.style.display = 'none'; return; }
+  const rect = matCanvas.getBoundingClientRect();
+  const n = points.length;
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const cellW = rect.width / n, cellH = rect.height / n;
+  const col = Math.floor(mx / cellW), row = Math.floor(my / cellH);
+  if (row >= 0 && row < n && col >= 0 && col < n) {
+    matTooltip.style.display = 'block';
+    matTooltip.style.left = (e.clientX - matCanvas.parentElement.getBoundingClientRect().left + 12) + 'px';
+    matTooltip.style.top = (my + matCanvas.parentElement.querySelector('.pane-header').offsetHeight + 4) + 'px';
+    matTooltip.textContent = `T[${row},${col}] = ${transitionMatrix[row][col].toFixed(4)}`;
+  } else {
+    matTooltip.style.display = 'none';
+  }
+});
+matCanvas.addEventListener('mouseleave', () => { matTooltip.style.display = 'none'; });
+
+// --- Computation ---
+function eucDist(a, b) {
+  return Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2);
+}
+
+function recompute() {
+  const n = points.length;
+  document.getElementById('matSize').textContent = n > 0 ? `${n}x${n}` : '';
+  if (n < 2) { transitionMatrix = null; rawWeights = null; return; }
+
+  // Compute pairwise distances
+  const dist = Array.from({length: n}, (_, i) =>
+    Array.from({length: n}, (_, j) => eucDist(points[i], points[j]))
+  );
+
+  // k-NN mask: for each point, keep only K nearest neighbors (symmetric)
+  const mask = Array.from({length: n}, () => new Uint8Array(n));
+  for (let i = 0; i < n; i++) {
+    const indices = Array.from({length: n}, (_, j) => j).filter(j => j !== i);
+    indices.sort((a, b) => dist[i][a] - dist[i][b]);
+    const kk = Math.min(K, indices.length);
+    for (let t = 0; t < kk; t++) {
+      mask[i][indices[t]] = 1;
+      mask[indices[t]][i] = 1; // symmetric
+    }
+  }
+
+  // Raw weights: w_ij = exp(-dist^2 / T) * mask
+  rawWeights = Array.from({length: n}, (_, i) =>
+    Array.from({length: n}, (_, j) => {
+      if (i === j || !mask[i][j]) return 0;
+      return Math.exp(-(dist[i][j] ** 2) / T);
+    })
+  );
+
+  // Column-normalize to get transition matrix
+  transitionMatrix = Array.from({length: n}, () => new Float64Array(n));
+  for (let j = 0; j < n; j++) {
+    let colSum = 0;
+    for (let i = 0; i < n; i++) colSum += rawWeights[i][j];
+    for (let i = 0; i < n; i++) {
+      transitionMatrix[i][j] = colSum > 0 ? rawWeights[i][j] / colSum : 0;
+    }
+  }
+}
+
+// --- Label Propagation Step ---
+function stepPropagation() {
+  const n = points.length;
+  if (n < 2 || !transitionMatrix) return;
+
+  // Initialize scores if needed
+  for (const p of points) {
+    if (p.score === null) {
+      p.score = p.label !== 0 ? p.label : 0;
+    }
+  }
+
+  // Build score vector
+  const scores = points.map(p => p.score);
+
+  // Multiply: new_scores = T * scores
+  const newScores = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let j = 0; j < n; j++) {
+      s += transitionMatrix[i][j] * scores[j];
+    }
+    newScores[i] = s;
+  }
+
+  // Clamp labeled points back to their labels
+  for (let i = 0; i < n; i++) {
+    if (points[i].label !== 0) {
+      newScores[i] = points[i].label;
+    }
+  }
+
+  // Assign
+  for (let i = 0; i < n; i++) {
+    points[i].score = newScores[i];
+  }
+
+  render();
+}
+
+// --- Rendering ---
+function render() {
+  renderMatrix();
+  renderData();
+}
+
+function renderMatrix() {
+  const w = matCanvas.width, h = matCanvas.height;
+  const dpr = devicePixelRatio;
+  matCtx.clearRect(0, 0, w, h);
+  matCtx.fillStyle = '#1a1a2e';
+  matCtx.fillRect(0, 0, w, h);
+
+  const n = points.length;
+  if (n < 2 || !transitionMatrix) {
+    matCtx.fillStyle = '#555';
+    matCtx.font = `${14 * dpr}px system-ui`;
+    matCtx.textAlign = 'center';
+    matCtx.fillText('Add at least 2 points', w/2, h/2);
+    return;
+  }
+
+  const cellW = w / n, cellH = h / n;
+
+  // Find max value for color scaling
+  let maxVal = 0;
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      if (transitionMatrix[i][j] > maxVal) maxVal = transitionMatrix[i][j];
+
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const v = maxVal > 0 ? transitionMatrix[i][j] / maxVal : 0;
+      // Use a warm color ramp: dark -> red -> orange -> yellow -> white
+      const r = Math.min(255, Math.floor(v * 3 * 255));
+      const g = Math.min(255, Math.floor(Math.max(0, v - 0.33) * 3 * 255));
+      const b = Math.min(255, Math.floor(Math.max(0, v - 0.66) * 3 * 255));
+      matCtx.fillStyle = `rgb(${r},${g},${b})`;
+      matCtx.fillRect(j * cellW, i * cellH, cellW + 1, cellH + 1);
+    }
+  }
+
+  // Grid lines for small matrices
+  if (n <= 30) {
+    matCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+    matCtx.lineWidth = dpr * 0.5;
+    for (let i = 0; i <= n; i++) {
+      matCtx.beginPath();
+      matCtx.moveTo(i * cellW, 0); matCtx.lineTo(i * cellW, h);
+      matCtx.moveTo(0, i * cellH); matCtx.lineTo(w, i * cellH);
+      matCtx.stroke();
+    }
+  }
+}
+
+function renderData() {
+  const w = dataCanvas.width, h = dataCanvas.height;
+  const dpr = devicePixelRatio;
+  dataCtx.clearRect(0, 0, w, h);
+  dataCtx.fillStyle = '#1a1a2e';
+  dataCtx.fillRect(0, 0, w, h);
+
+  const n = points.length;
+  if (n === 0) {
+    dataCtx.fillStyle = '#555';
+    dataCtx.font = `${14 * dpr}px system-ui`;
+    dataCtx.textAlign = 'center';
+    dataCtx.fillText('Click to add points', w/2, h/2);
+    dataCtx.font = `${11 * dpr}px system-ui`;
+    dataCtx.fillText('Right-click to delete, drag to move', w/2, h/2 + 20*dpr);
+    return;
+  }
+
+  // Draw connection lines
+  if (rawWeights && n >= 2) {
+    let maxW = 0;
+    for (let i = 0; i < n; i++)
+      for (let j = i+1; j < n; j++)
+        if (rawWeights[i][j] > maxW) maxW = rawWeights[i][j];
+
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const wt = rawWeights[i][j];
+        if (wt <= 0) continue;
+        const alpha = maxW > 0 ? (wt / maxW) * 0.5 : 0;
+        if (alpha < 0.01) continue;
+        // Color: warm tone matching the heatmap
+        const v = maxW > 0 ? wt / maxW : 0;
+        const r = Math.min(255, Math.floor(v * 3 * 255));
+        const g = Math.min(255, Math.floor(Math.max(0, v - 0.33) * 3 * 255));
+        const b = Math.min(255, Math.floor(Math.max(0, v - 0.66) * 3 * 255));
+        dataCtx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        dataCtx.lineWidth = dpr * (0.5 + 2 * (wt / maxW));
+        dataCtx.beginPath();
+        dataCtx.moveTo(points[i].x * w, points[i].y * h);
+        dataCtx.lineTo(points[j].x * w, points[j].y * h);
+        dataCtx.stroke();
+      }
+    }
+  }
+
+  // Draw points
+  const radius = 8 * dpr;
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    const px = p.x * w, py = p.y * h;
+
+    // Determine fill color
+    let fill;
+    if (p.score !== null) {
+      if (hardDisplay) {
+        // Hard: threshold at 0 to pick black or white
+        fill = p.score >= 0 ? '#ffffff' : '#000000';
+      } else {
+        // Soft: map score from [-1,1] to grayscale [0,255]
+        const gray = Math.round(((p.score + 1) / 2) * 255);
+        fill = `rgb(${gray},${gray},${gray})`;
+      }
+    } else if (p.label === 1) {
+      fill = '#ffffff';
+    } else if (p.label === -1) {
+      fill = '#000000';
+    } else {
+      fill = '#808080';
+    }
+
+    dataCtx.beginPath();
+    dataCtx.arc(px, py, radius, 0, Math.PI * 2);
+    dataCtx.fillStyle = fill;
+    dataCtx.fill();
+
+    // Border: labeled points get a colored ring
+    if (p.label === 1) {
+      dataCtx.strokeStyle = '#4fc3f7';
+      dataCtx.lineWidth = 2.5 * dpr;
+    } else if (p.label === -1) {
+      dataCtx.strokeStyle = '#e94560';
+      dataCtx.lineWidth = 2.5 * dpr;
+    } else {
+      dataCtx.strokeStyle = '#666';
+      dataCtx.lineWidth = 1.5 * dpr;
+    }
+    dataCtx.stroke();
+
+    // Index label for small datasets
+    if (n <= 30) {
+      dataCtx.fillStyle = p.label === -1 || (p.score !== null && p.score < -0.2) ? '#fff' : '#000';
+      dataCtx.font = `bold ${9 * dpr}px system-ui`;
+      dataCtx.textAlign = 'center';
+      dataCtx.textBaseline = 'middle';
+      dataCtx.fillText(i.toString(), px, py);
+    }
+  }
+}
+
+// --- Presets ---
+function addPreset(pts) {
+  points = pts;
+  recompute(); render();
+}
+
+document.getElementById('presetTwo').onclick = () => {
+  const pts = [];
+  // Cluster A (positive seeds + unlabeled)
+  pts.push({ x: 0.2, y: 0.35, label: 1, score: null });
+  for (let i = 0; i < 8; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = 0.03 + Math.random() * 0.08;
+    pts.push({ x: 0.25 + Math.cos(angle)*r, y: 0.4 + Math.sin(angle)*r, label: 0, score: null });
+  }
+  // Cluster B (negative seeds + unlabeled)
+  pts.push({ x: 0.8, y: 0.65, label: -1, score: null });
+  for (let i = 0; i < 8; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = 0.03 + Math.random() * 0.08;
+    pts.push({ x: 0.75 + Math.cos(angle)*r, y: 0.6 + Math.sin(angle)*r, label: 0, score: null });
+  }
+  addPreset(pts);
+};
+
+document.getElementById('presetMoons').onclick = () => {
+  const pts = [];
+  const n = 15;
+  // Upper moon
+  for (let i = 0; i < n; i++) {
+    const angle = Math.PI * i / (n - 1);
+    const x = 0.3 + 0.2 * Math.cos(angle) + (Math.random()-0.5)*0.02;
+    const y = 0.5 - 0.15 * Math.sin(angle) + (Math.random()-0.5)*0.02;
+    pts.push({ x, y, label: i === 0 ? 1 : 0, score: null });
+  }
+  // Lower moon
+  for (let i = 0; i < n; i++) {
+    const angle = Math.PI + Math.PI * i / (n - 1);
+    const x = 0.5 + 0.2 * Math.cos(angle) + (Math.random()-0.5)*0.02;
+    const y = 0.5 - 0.15 * Math.sin(angle) + (Math.random()-0.5)*0.02;
+    pts.push({ x, y, label: i === 0 ? -1 : 0, score: null });
+  }
+  addPreset(pts);
+};
+
+document.getElementById('presetSpiral').onclick = () => {
+  const pts = [];
+  const n = 20;
+  for (let i = 0; i < n; i++) {
+    const t = i / n * 2 * Math.PI;
+    const r = 0.05 + 0.15 * (i / n);
+    const x = 0.5 + r * Math.cos(t) + (Math.random()-0.5)*0.015;
+    const y = 0.5 + r * Math.sin(t) + (Math.random()-0.5)*0.015;
+    pts.push({ x, y, label: i === 0 ? 1 : 0, score: null });
+  }
+  for (let i = 0; i < n; i++) {
+    const t = i / n * 2 * Math.PI + Math.PI;
+    const r = 0.05 + 0.15 * (i / n);
+    const x = 0.5 + r * Math.cos(t) + (Math.random()-0.5)*0.015;
+    const y = 0.5 + r * Math.sin(t) + (Math.random()-0.5)*0.015;
+    pts.push({ x, y, label: i === 0 ? -1 : 0, score: null });
+  }
+  addPreset(pts);
+};
+
+// --- Init ---
+requestAnimationFrame(() => { resize(); });
+</script>
+</body>
+</html>
