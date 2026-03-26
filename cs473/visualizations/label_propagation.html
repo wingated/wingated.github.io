@@ -4,158 +4,334 @@
 <meta charset="UTF-8">
 <title>Label Propagation Visualizer</title>
 <style>
+  :root {
+    --bg: #0f0f1a;
+    --surface: #161625;
+    --surface2: #1c1c30;
+    --border: #2a2a45;
+    --accent: #e94560;
+    --accent2: #4fc3f7;
+    --text: #e0e0e0;
+    --text-dim: #777;
+    --positive: #4fc3f7;
+    --negative: #e94560;
+    --radius: 6px;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: #1a1a2e;
-    color: #e0e0e0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', 'SF Pro Display', system-ui, sans-serif;
     height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    user-select: none;
   }
-  header {
-    padding: 10px 20px;
-    background: #16213e;
-    border-bottom: 1px solid #0f3460;
+
+  /* --- Header --- */
+  .toolbar {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
   }
-  header h1 { font-size: 16px; font-weight: 600; color: #e94560; white-space: nowrap; }
-  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .ctrl-group { display: flex; align-items: center; gap: 6px; }
-  .ctrl-group label { font-size: 12px; color: #aaa; white-space: nowrap; }
-  .ctrl-group input[type=range] { width: 100px; accent-color: #e94560; }
-  .ctrl-group .val { font-size: 12px; color: #e94560; min-width: 28px; text-align: right; }
-  button {
-    background: #0f3460; border: 1px solid #e94560; color: #e0e0e0;
-    padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
-    transition: background .15s;
+  .toolbar .brand {
+    font-size: 15px; font-weight: 700; color: var(--accent);
+    margin-right: 8px; letter-spacing: -0.3px;
   }
-  button:hover { background: #e94560; color: #fff; }
-  button.primary { background: #e94560; color: #fff; font-weight: 600; }
-  button.primary:hover { background: #c7354e; }
+  .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+
+  /* --- Buttons & Inputs --- */
+  button, .btn {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 11px; border-radius: var(--radius); cursor: pointer; font-size: 11px;
+    font-weight: 500; transition: all .12s; white-space: nowrap; line-height: 1.3;
+  }
+  button:hover { background: #2a2a45; border-color: #444; }
+  button.active, button.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+  button.active:hover, button.primary:hover { background: #c7354e; }
+  button.accent2.active {
+    background: var(--accent2); border-color: var(--accent2); color: #000;
+  }
+  button:active { transform: scale(0.97); }
+  button .kbd {
+    font-size: 9px; opacity: 0.55; margin-left: 4px;
+    background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px;
+  }
+
+  .ctrl-group { display: flex; align-items: center; gap: 5px; }
+  .ctrl-group label {
+    font-size: 10px; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.5px; font-weight: 600;
+  }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 90px; height: 4px;
+    background: var(--border); border-radius: 2px; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid var(--bg);
+  }
+  .val {
+    font-size: 11px; color: var(--accent); min-width: 30px;
+    text-align: center; font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+
+  /* --- Layout --- */
   .main { display: flex; flex: 1; min-height: 0; }
-  .pane { flex: 1; position: relative; display: flex; flex-direction: column; }
+  .pane { position: relative; display: flex; flex-direction: column; overflow: hidden; }
+  .pane-left { width: 35%; min-width: 200px; }
+  .pane-right { flex: 1; }
   .pane-header {
-    padding: 6px 12px; font-size: 13px; font-weight: 600;
-    background: #16213e; border-bottom: 1px solid #0f3460;
+    padding: 7px 12px; font-size: 11px; font-weight: 600;
+    background: var(--surface); border-bottom: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
+    text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim);
   }
-  .divider { width: 1px; background: #0f3460; }
+  .pane-header .badge {
+    font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text-dim); font-variant-numeric: tabular-nums;
+  }
+  .divider { width: 1px; background: var(--border); }
   canvas { flex: 1; display: block; }
   #dataCanvas { cursor: crosshair; }
-  .legend {
-    position: absolute; bottom: 8px; left: 8px;
-    background: rgba(22,33,62,0.9); padding: 6px 10px; border-radius: 4px;
-    font-size: 11px; display: flex; gap: 12px;
+
+  /* --- Bottom bar --- */
+  .bottom-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 14px; background: var(--surface);
+    border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim);
   }
-  .legend-item { display: flex; align-items: center; gap: 4px; }
-  .legend-dot {
-    width: 10px; height: 10px; border-radius: 50%; border: 1px solid #555;
+  .bottom-bar .status { display: flex; align-items: center; gap: 6px; }
+  .bottom-bar .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
   }
-  .mode-indicator {
-    font-size: 11px; color: #e94560; padding: 2px 8px;
-    border: 1px solid #e94560; border-radius: 3px;
+  .bottom-bar .dot.converged { background: #4caf50; }
+  .bottom-bar .spacer { flex: 1; }
+  .bottom-bar kbd {
+    font-size: 9px; background: var(--surface2); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 3px; color: var(--text-dim);
   }
+
+  /* --- Overlays --- */
   .tooltip {
-    position: absolute; background: rgba(22,33,62,0.95); color: #e0e0e0;
-    padding: 4px 8px; border-radius: 4px; font-size: 11px; pointer-events: none;
-    border: 1px solid #0f3460; display: none; z-index: 10;
+    position: absolute; background: rgba(15,15,26,0.95); color: var(--text);
+    padding: 5px 9px; border-radius: var(--radius); font-size: 11px; pointer-events: none;
+    border: 1px solid var(--border); display: none; z-index: 10;
+    backdrop-filter: blur(8px); font-variant-numeric: tabular-nums;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
   }
-  .preset-btns { display: flex; gap: 6px; }
+  .legend {
+    position: absolute; bottom: 10px; left: 10px;
+    background: rgba(15,15,26,0.85); padding: 8px 12px; border-radius: var(--radius);
+    font-size: 10px; display: flex; gap: 14px; border: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #555;
+  }
+
+  /* --- Score history chart --- */
+  .chart-container {
+    position: absolute; bottom: 10px; right: 10px;
+    width: 200px; height: 100px;
+    background: rgba(15,15,26,0.85); border-radius: var(--radius);
+    border: 1px solid var(--border); backdrop-filter: blur(8px);
+    overflow: hidden;
+  }
+  .chart-container .chart-title {
+    font-size: 9px; color: var(--text-dim); padding: 4px 8px;
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+  }
+  .chart-container canvas { width: 100%; height: calc(100% - 20px); }
+
+  /* --- Animations --- */
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+  .playing .dot { animation: pulse 0.8s ease infinite; }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Label Propagation</h1>
-  <div class="controls">
-    <div class="ctrl-group">
-      <label>Temp (T):</label>
-      <input type="range" id="tempSlider" min="0.01" max="5" step="0.01" value="1.0">
-      <span class="val" id="tempVal">1.00</span>
-    </div>
-    <div class="ctrl-group">
-      <label>k-NN:</label>
-      <input type="range" id="kSlider" min="1" max="20" step="1" value="5">
-      <span class="val" id="kVal">5</span>
-    </div>
-    <div class="ctrl-group">
-      <label>Place:</label>
-      <button id="modePos" class="primary">+ Positive</button>
-      <button id="modeNeg">- Negative</button>
-      <button id="modeUnl">? Unlabeled</button>
-    </div>
-    <button id="stepBtn" class="primary">Step &rarr;</button>
-    <button id="toggleDisplay">Show: Soft</button>
-    <button id="resetLabels">Reset Labels</button>
-    <button id="resetAll">Clear All</button>
-    <div class="preset-btns">
-      <button id="presetTwo">Two Clusters</button>
-      <button id="presetMoons">Moons</button>
-      <button id="presetSpiral">Spiral</button>
-    </div>
+<div class="toolbar">
+  <span class="brand">Label Propagation</span>
+  <div class="sep"></div>
+
+  <div class="ctrl-group">
+    <label>Temp</label>
+    <input type="range" id="tempSlider" min="0.01" max="5" step="0.01" value="1.0">
+    <span class="val" id="tempVal">1.00</span>
   </div>
-</header>
+  <div class="ctrl-group">
+    <label>k-NN</label>
+    <input type="range" id="kSlider" min="1" max="20" step="1" value="5">
+    <span class="val" id="kVal">5</span>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="ctrl-group" id="modeGroup">
+    <label>Place</label>
+    <button id="modePos" class="active"><span style="color:var(--positive);">&#9679;</span> Pos <span class="kbd">1</span></button>
+    <button id="modeNeg"><span style="color:var(--negative);">&#9679;</span> Neg <span class="kbd">2</span></button>
+    <button id="modeUnl">&#9675; Unlbl <span class="kbd">3</span></button>
+  </div>
+
+  <div class="sep"></div>
+
+  <button id="stepBtn" class="primary">Step <span class="kbd">S</span></button>
+  <button id="playBtn">Auto <span class="kbd">A</span></button>
+  <button id="toggleDisplay">Soft <span class="kbd">D</span></button>
+
+  <div class="sep"></div>
+
+  <button id="resetLabels">Reset Labels <span class="kbd">R</span></button>
+  <button id="resetAll">Clear All</button>
+
+  <div class="sep"></div>
+
+  <button id="presetTwo">Two Clusters</button>
+  <button id="presetMoons">Moons</button>
+  <button id="presetSpiral">Spiral</button>
+  <button id="presetBridge">Bridge</button>
+  <button id="presetRing">Ring</button>
+</div>
 
 <div class="main">
-  <div class="pane" id="matrixPane">
+  <div class="pane pane-left" id="matrixPane">
     <div class="pane-header">
-      <span>Transition Matrix (column-normalized)</span>
-      <span id="matSize" style="font-size:11px;color:#888;"></span>
+      <span>Transition Matrix</span>
+      <span class="badge" id="matSize">0 &times; 0</span>
     </div>
     <canvas id="matrixCanvas"></canvas>
     <div class="tooltip" id="matTooltip"></div>
   </div>
   <div class="divider"></div>
-  <div class="pane" id="dataPane">
+  <div class="pane pane-right" id="dataPane">
     <div class="pane-header">
-      <span>Data Points</span>
-      <span class="mode-indicator" id="modeLabel">Placing: Positive</span>
+      <span>Data Space</span>
+      <span class="badge" id="modeLabel">Placing: Positive</span>
     </div>
     <canvas id="dataCanvas"></canvas>
     <div class="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#fff;"></div>Positive (+1)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#000;"></div>Negative (-1)</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#808080;"></div>Unlabeled</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--positive);border-color:var(--positive);"></div>Positive (+1)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--negative);border-color:var(--negative);"></div>Negative (&minus;1)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#555;border-color:#555;"></div>Unlabeled</div>
     </div>
+    <div class="chart-container" id="chartBox">
+      <div class="chart-title">Score history (unlabeled avg)</div>
+      <canvas id="chartCanvas"></canvas>
+    </div>
+    <div class="tooltip" id="dataTooltip"></div>
   </div>
 </div>
 
+<div class="bottom-bar" id="bottomBar">
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Ready — click to add points</span>
+  </div>
+  <span id="iterLabel" style="font-variant-numeric:tabular-nums;"></span>
+  <span class="spacer"></span>
+  <span>
+    <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> mode &nbsp;
+    <kbd>S</kbd> step &nbsp;
+    <kbd>A</kbd> auto &nbsp;
+    <kbd>D</kbd> display &nbsp;
+    <kbd>R</kbd> reset &nbsp;
+    <kbd>Del</kbd> remove hovered
+  </span>
+</div>
+
 <script>
-// --- State ---
-let points = []; // {x, y, label: 1|-1|0, score: null}
-let placementMode = 1; // 1, -1, 0
-let hardDisplay = false; // false = soft (grayscale), true = hard (argmax)
+// ========== STATE ==========
+let points = [];       // {x, y, label: 1|-1|0, score: null, prevScore: null}
+let placementMode = 1;
+let hardDisplay = false;
 let T = 1.0;
 let K = 5;
-let transitionMatrix = null; // column-normalized
+let transitionMatrix = null;
 let rawWeights = null;
+let iteration = 0;
+let autoPlay = false;
+let autoTimer = null;
+let hoveredPoint = -1;
+let hoveredMatCell = null;
+let scoreHistory = []; // [{step, avg, min, max}]
 
 const matCanvas = document.getElementById('matrixCanvas');
 const matCtx = matCanvas.getContext('2d');
 const dataCanvas = document.getElementById('dataCanvas');
 const dataCtx = dataCanvas.getContext('2d');
-const matTooltip = document.getElementById('matTooltip');
+const chartCanvas = document.getElementById('chartCanvas');
+const chartCtx = chartCanvas.getContext('2d');
 
-// --- Resize ---
+// ========== COLORMAPS ==========
+function viridis(t) {
+  // Attempt at a pleasant perceptual colormap
+  t = Math.max(0, Math.min(1, t));
+  const r = Math.round(255 * Math.max(0, Math.min(1, -0.35 + 2.1*t - 2.8*t*t + 2.1*t*t*t)));
+  const g = Math.round(255 * Math.max(0, Math.min(1, -0.05 + 0.6*t + 1.2*t*t - 0.8*t*t*t)));
+  const b = Math.round(255 * Math.max(0, Math.min(1, 0.35 + 1.2*t - 3.4*t*t + 2.8*t*t*t)));
+  return [r, g, b];
+}
+
+function inferno(t) {
+  t = Math.max(0, Math.min(1, t));
+  const r = Math.round(255 * Math.min(1, Math.max(0, 1.2*t + 0.3*t*t)));
+  const g = Math.round(255 * Math.min(1, Math.max(0, -0.15 + 1.8*(t**1.5))));
+  const b = Math.round(255 * Math.min(1, Math.max(0, 0.5*Math.sin(Math.PI*t*0.85) + 0.15)));
+  return [r, g, b];
+}
+
+// Score to color: diverging blue-white-red
+function scoreColor(s, alpha = 1) {
+  s = Math.max(-1, Math.min(1, s));
+  const t = (s + 1) / 2; // 0..1
+  let r, g, b;
+  if (t < 0.5) {
+    const u = t * 2; // 0..1
+    r = Math.round(233 * (0.3 + 0.7 * u));
+    g = Math.round(69 * (0.3 + 0.7 * u) + 100 * u);
+    b = Math.round(96 + 159 * (1 - u));
+  } else {
+    const u = (t - 0.5) * 2; // 0..1
+    r = Math.round(79 + 176 * (1 - u));
+    g = Math.round(169 + 86 * (1 - u));
+    b = Math.round(247 - 200 * u);
+  }
+  return alpha < 1 ? `rgba(${r},${g},${b},${alpha})` : `rgb(${r},${g},${b})`;
+}
+
+// ========== RESIZE ==========
 function resize() {
+  const dpr = devicePixelRatio;
   for (const c of [matCanvas, dataCanvas]) {
     const r = c.parentElement.getBoundingClientRect();
-    const h = r.height - c.parentElement.querySelector('.pane-header').offsetHeight;
-    c.width = r.width * devicePixelRatio;
-    c.height = h * devicePixelRatio;
+    const hdr = c.parentElement.querySelector('.pane-header');
+    const h = r.height - (hdr ? hdr.offsetHeight : 0);
+    c.width = Math.round(r.width * dpr);
+    c.height = Math.round(h * dpr);
     c.style.width = r.width + 'px';
     c.style.height = h + 'px';
   }
+  // Chart canvas
+  const cbox = document.getElementById('chartBox');
+  const cr = cbox.getBoundingClientRect();
+  chartCanvas.width = Math.round(cr.width * dpr);
+  chartCanvas.height = Math.round((cr.height - 20) * dpr);
   render();
 }
 window.addEventListener('resize', resize);
 
-// --- Controls ---
+// ========== CONTROLS ==========
 const tempSlider = document.getElementById('tempSlider');
 const kSlider = document.getElementById('kSlider');
 tempSlider.addEventListener('input', () => {
@@ -171,59 +347,163 @@ kSlider.addEventListener('input', () => {
 
 function setMode(m) {
   placementMode = m;
-  document.getElementById('modePos').className = m === 1 ? 'primary' : '';
-  document.getElementById('modeNeg').className = m === -1 ? 'primary' : '';
-  document.getElementById('modeUnl').className = m === 0 ? 'primary' : '';
-  const labels = {1: 'Placing: Positive', '-1': 'Placing: Negative', 0: 'Placing: Unlabeled'};
+  document.querySelectorAll('#modeGroup button').forEach(b => b.classList.remove('active'));
+  if (m === 1) document.getElementById('modePos').classList.add('active');
+  if (m === -1) document.getElementById('modeNeg').classList.add('active');
+  if (m === 0) document.getElementById('modeUnl').classList.add('active');
+  const labels = {1:'Placing: Positive', '-1':'Placing: Negative', 0:'Placing: Unlabeled'};
   document.getElementById('modeLabel').textContent = labels[m];
 }
 document.getElementById('modePos').onclick = () => setMode(1);
 document.getElementById('modeNeg').onclick = () => setMode(-1);
 document.getElementById('modeUnl').onclick = () => setMode(0);
 
-document.getElementById('toggleDisplay').onclick = () => {
+document.getElementById('toggleDisplay').onclick = toggleDisplay;
+function toggleDisplay() {
   hardDisplay = !hardDisplay;
-  document.getElementById('toggleDisplay').textContent = hardDisplay ? 'Show: Hard' : 'Show: Soft';
+  const btn = document.getElementById('toggleDisplay');
+  btn.innerHTML = (hardDisplay ? 'Hard' : 'Soft') + ' <span class="kbd">D</span>';
   render();
-};
-document.getElementById('stepBtn').onclick = stepPropagation;
-document.getElementById('resetLabels').onclick = () => {
-  points.forEach(p => p.score = null);
+}
+
+document.getElementById('stepBtn').onclick = () => doStep();
+document.getElementById('playBtn').onclick = toggleAutoPlay;
+
+function toggleAutoPlay() {
+  autoPlay = !autoPlay;
+  const btn = document.getElementById('playBtn');
+  if (autoPlay) {
+    btn.classList.add('active');
+    btn.innerHTML = 'Stop <span class="kbd">A</span>';
+    document.getElementById('bottomBar').classList.add('playing');
+    autoTimer = setInterval(() => {
+      doStep();
+      // Auto-stop on convergence
+      if (scoreHistory.length >= 2) {
+        const last = scoreHistory[scoreHistory.length - 1];
+        const prev = scoreHistory[scoreHistory.length - 2];
+        if (Math.abs(last.avg - prev.avg) < 1e-6) {
+          toggleAutoPlay();
+        }
+      }
+    }, 200);
+  } else {
+    btn.classList.remove('active');
+    btn.innerHTML = 'Auto <span class="kbd">A</span>';
+    document.getElementById('bottomBar').classList.remove('playing');
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+}
+
+document.getElementById('resetLabels').onclick = resetLabels;
+function resetLabels() {
+  if (autoPlay) toggleAutoPlay();
+  points.forEach(p => { p.score = null; p.prevScore = null; });
+  iteration = 0; scoreHistory = [];
+  updateStatus();
   render();
-};
+}
+
 document.getElementById('resetAll').onclick = () => {
+  if (autoPlay) toggleAutoPlay();
   points = []; transitionMatrix = null; rawWeights = null;
+  iteration = 0; scoreHistory = [];
+  hoveredPoint = -1;
+  updateStatus();
   render();
 };
 
-// --- Data canvas interaction ---
-dataCanvas.addEventListener('click', (e) => {
-  const rect = dataCanvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) / rect.width;
-  const y = (e.clientY - rect.top) / rect.height;
-  points.push({ x, y, label: placementMode, score: null });
-  recompute(); render();
+// ========== KEYBOARD ==========
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  const key = e.key.toLowerCase();
+  if (key === '1') setMode(1);
+  else if (key === '2') setMode(-1);
+  else if (key === '3') setMode(0);
+  else if (key === 's') doStep();
+  else if (key === 'a') toggleAutoPlay();
+  else if (key === 'd') toggleDisplay();
+  else if (key === 'r') resetLabels();
+  else if ((key === 'delete' || key === 'backspace') && hoveredPoint >= 0) {
+    points.splice(hoveredPoint, 1);
+    hoveredPoint = -1;
+    recompute(); render();
+  }
 });
 
-// Drag support
+// ========== DATA CANVAS INTERACTION ==========
 let dragging = null;
+let dragMoved = false;
+
 dataCanvas.addEventListener('mousedown', (e) => {
   const rect = dataCanvas.getBoundingClientRect();
   const mx = (e.clientX - rect.left) / rect.width;
   const my = (e.clientY - rect.top) / rect.height;
   const idx = findPoint(mx, my, rect);
-  if (idx >= 0) { dragging = idx; e.preventDefault(); }
+  if (idx >= 0) { dragging = idx; dragMoved = false; e.preventDefault(); }
 });
-dataCanvas.addEventListener('mousemove', (e) => {
-  if (dragging === null) return;
-  const rect = dataCanvas.getBoundingClientRect();
-  points[dragging].x = (e.clientX - rect.left) / rect.width;
-  points[dragging].y = (e.clientY - rect.top) / rect.height;
-  recompute(); render();
-});
-dataCanvas.addEventListener('mouseup', () => { dragging = null; });
 
-// Right-click to delete
+dataCanvas.addEventListener('mousemove', (e) => {
+  const rect = dataCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top) / rect.height;
+
+  if (dragging !== null) {
+    dragMoved = true;
+    points[dragging].x = Math.max(0.02, Math.min(0.98, mx));
+    points[dragging].y = Math.max(0.02, Math.min(0.98, my));
+    recompute(); render();
+    return;
+  }
+
+  const idx = findPoint(mx, my, rect);
+  if (idx !== hoveredPoint) {
+    hoveredPoint = idx;
+    dataCanvas.style.cursor = idx >= 0 ? 'grab' : 'crosshair';
+    render();
+  }
+  // Data tooltip
+  const tip = document.getElementById('dataTooltip');
+  if (idx >= 0) {
+    const p = points[idx];
+    const labelStr = p.label === 1 ? 'Positive' : p.label === -1 ? 'Negative' : 'Unlabeled';
+    const scoreStr = p.score !== null ? p.score.toFixed(4) : '—';
+    tip.innerHTML = `<b>#${idx}</b> ${labelStr}<br>Score: ${scoreStr}`;
+    tip.style.display = 'block';
+    tip.style.left = (e.clientX - dataCanvas.parentElement.getBoundingClientRect().left + 14) + 'px';
+    tip.style.top = (e.clientY - dataCanvas.parentElement.getBoundingClientRect().top - 10) + 'px';
+  } else {
+    tip.style.display = 'none';
+  }
+});
+
+dataCanvas.addEventListener('mouseup', (e) => {
+  if (dragging !== null && !dragMoved) {
+    // Was a click on existing point, not a drag — don't add new
+    dragging = null;
+    return;
+  }
+  if (dragging !== null) { dragging = null; return; }
+});
+
+dataCanvas.addEventListener('click', (e) => {
+  if (dragMoved) { dragMoved = false; return; }
+  const rect = dataCanvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width;
+  const my = (e.clientY - rect.top) / rect.height;
+  const idx = findPoint(mx, my, rect);
+  if (idx >= 0) return; // clicked on existing point
+  points.push({ x: mx, y: my, label: placementMode, score: null, prevScore: null });
+  recompute(); updateStatus(); render();
+});
+
+dataCanvas.addEventListener('mouseleave', () => {
+  hoveredPoint = -1;
+  document.getElementById('dataTooltip').style.display = 'none';
+  render();
+});
+
 dataCanvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const rect = dataCanvas.getBoundingClientRect();
@@ -232,12 +512,13 @@ dataCanvas.addEventListener('contextmenu', (e) => {
   const idx = findPoint(mx, my, rect);
   if (idx >= 0) {
     points.splice(idx, 1);
-    recompute(); render();
+    hoveredPoint = -1;
+    recompute(); updateStatus(); render();
   }
 });
 
 function findPoint(mx, my, rect) {
-  const r = 12 / rect.width;
+  const r = 14 / rect.width;
   for (let i = points.length - 1; i >= 0; i--) {
     const dx = points[i].x - mx, dy = points[i].y - my;
     if (Math.sqrt(dx*dx + dy*dy) < r) return i;
@@ -245,41 +526,49 @@ function findPoint(mx, my, rect) {
   return -1;
 }
 
-// --- Matrix tooltip ---
+// ========== MATRIX TOOLTIP ==========
 matCanvas.addEventListener('mousemove', (e) => {
-  if (!transitionMatrix || points.length === 0) { matTooltip.style.display = 'none'; return; }
+  if (!transitionMatrix || points.length < 2) {
+    matTooltip.style.display = 'none'; hoveredMatCell = null; return;
+  }
   const rect = matCanvas.getBoundingClientRect();
   const n = points.length;
   const mx = e.clientX - rect.left, my = e.clientY - rect.top;
   const cellW = rect.width / n, cellH = rect.height / n;
   const col = Math.floor(mx / cellW), row = Math.floor(my / cellH);
   if (row >= 0 && row < n && col >= 0 && col < n) {
-    matTooltip.style.display = 'block';
-    matTooltip.style.left = (e.clientX - matCanvas.parentElement.getBoundingClientRect().left + 12) + 'px';
-    matTooltip.style.top = (my + matCanvas.parentElement.querySelector('.pane-header').offsetHeight + 4) + 'px';
-    matTooltip.textContent = `T[${row},${col}] = ${transitionMatrix[row][col].toFixed(4)}`;
+    hoveredMatCell = { row, col };
+    const tip = document.getElementById('matTooltip');
+    tip.style.display = 'block';
+    tip.style.left = (e.clientX - matCanvas.parentElement.getBoundingClientRect().left + 14) + 'px';
+    tip.style.top = (my + matCanvas.parentElement.querySelector('.pane-header').offsetHeight + 4) + 'px';
+    tip.innerHTML = `<b>T[${row}, ${col}]</b> = ${transitionMatrix[row][col].toFixed(4)}`;
+    render(); // re-render to highlight
   } else {
-    matTooltip.style.display = 'none';
+    hoveredMatCell = null;
+    document.getElementById('matTooltip').style.display = 'none';
   }
 });
-matCanvas.addEventListener('mouseleave', () => { matTooltip.style.display = 'none'; });
+matCanvas.addEventListener('mouseleave', () => {
+  document.getElementById('matTooltip').style.display = 'none';
+  hoveredMatCell = null; render();
+});
 
-// --- Computation ---
+// ========== COMPUTATION ==========
 function eucDist(a, b) {
-  return Math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2);
+  return Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
 }
 
 function recompute() {
   const n = points.length;
-  document.getElementById('matSize').textContent = n > 0 ? `${n}x${n}` : '';
+  document.getElementById('matSize').textContent = n > 0 ? `${n} \u00d7 ${n}` : '0 \u00d7 0';
   if (n < 2) { transitionMatrix = null; rawWeights = null; return; }
 
-  // Compute pairwise distances
   const dist = Array.from({length: n}, (_, i) =>
     Array.from({length: n}, (_, j) => eucDist(points[i], points[j]))
   );
 
-  // k-NN mask: for each point, keep only K nearest neighbors (symmetric)
+  // k-NN mask (symmetric)
   const mask = Array.from({length: n}, () => new Uint8Array(n));
   for (let i = 0; i < n; i++) {
     const indices = Array.from({length: n}, (_, j) => j).filter(j => j !== i);
@@ -287,11 +576,10 @@ function recompute() {
     const kk = Math.min(K, indices.length);
     for (let t = 0; t < kk; t++) {
       mask[i][indices[t]] = 1;
-      mask[indices[t]][i] = 1; // symmetric
+      mask[indices[t]][i] = 1;
     }
   }
 
-  // Raw weights: w_ij = exp(-dist^2 / T) * mask
   rawWeights = Array.from({length: n}, (_, i) =>
     Array.from({length: n}, (_, j) => {
       if (i === j || !mask[i][j]) return 0;
@@ -299,7 +587,7 @@ function recompute() {
     })
   );
 
-  // Column-normalize to get transition matrix
+  // Column-normalize
   transitionMatrix = Array.from({length: n}, () => new Float64Array(n));
   for (let j = 0; j < n; j++) {
     let colSum = 0;
@@ -310,91 +598,134 @@ function recompute() {
   }
 }
 
-// --- Label Propagation Step ---
-function stepPropagation() {
+// ========== LABEL PROPAGATION STEP ==========
+function doStep() {
   const n = points.length;
   if (n < 2 || !transitionMatrix) return;
 
-  // Initialize scores if needed
   for (const p of points) {
+    p.prevScore = p.score;
     if (p.score === null) {
       p.score = p.label !== 0 ? p.label : 0;
     }
   }
 
-  // Build score vector
   const scores = points.map(p => p.score);
-
-  // Multiply: new_scores = T * scores
   const newScores = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     let s = 0;
-    for (let j = 0; j < n; j++) {
-      s += transitionMatrix[i][j] * scores[j];
-    }
+    for (let j = 0; j < n; j++) s += transitionMatrix[i][j] * scores[j];
     newScores[i] = s;
   }
 
-  // Clamp labeled points back to their labels
+  // Clamp labeled points
   for (let i = 0; i < n; i++) {
-    if (points[i].label !== 0) {
-      newScores[i] = points[i].label;
-    }
+    if (points[i].label !== 0) newScores[i] = points[i].label;
   }
 
-  // Assign
-  for (let i = 0; i < n; i++) {
-    points[i].score = newScores[i];
+  for (let i = 0; i < n; i++) points[i].score = newScores[i];
+  iteration++;
+
+  // Track history for unlabeled points
+  const unlabeled = points.filter(p => p.label === 0);
+  if (unlabeled.length > 0) {
+    const avg = unlabeled.reduce((s, p) => s + p.score, 0) / unlabeled.length;
+    const min = Math.min(...unlabeled.map(p => p.score));
+    const max = Math.max(...unlabeled.map(p => p.score));
+    scoreHistory.push({ step: iteration, avg, min, max });
   }
 
+  updateStatus();
   render();
 }
 
-// --- Rendering ---
+function updateStatus() {
+  const n = points.length;
+  const nLabeled = points.filter(p => p.label !== 0).length;
+  const nUnlabeled = n - nLabeled;
+  let statusText = '';
+  if (n === 0) {
+    statusText = 'Ready — click to add points';
+  } else {
+    statusText = `${n} points (${nLabeled} labeled, ${nUnlabeled} unlabeled)`;
+  }
+  document.getElementById('statusText').textContent = statusText;
+  document.getElementById('iterLabel').textContent = iteration > 0 ? `Iteration ${iteration}` : '';
+
+  // Check convergence
+  const dot = document.getElementById('statusDot');
+  if (iteration > 0 && scoreHistory.length >= 2) {
+    const last = scoreHistory[scoreHistory.length - 1];
+    const prev = scoreHistory[scoreHistory.length - 2];
+    if (Math.abs(last.avg - prev.avg) < 1e-6) {
+      dot.className = 'dot converged';
+    } else {
+      dot.className = 'dot';
+    }
+  } else {
+    dot.className = 'dot';
+  }
+}
+
+// ========== RENDERING ==========
 function render() {
   renderMatrix();
   renderData();
+  renderChart();
 }
 
 function renderMatrix() {
   const w = matCanvas.width, h = matCanvas.height;
   const dpr = devicePixelRatio;
   matCtx.clearRect(0, 0, w, h);
-  matCtx.fillStyle = '#1a1a2e';
+  matCtx.fillStyle = '#0f0f1a';
   matCtx.fillRect(0, 0, w, h);
 
   const n = points.length;
   if (n < 2 || !transitionMatrix) {
-    matCtx.fillStyle = '#555';
-    matCtx.font = `${14 * dpr}px system-ui`;
+    matCtx.fillStyle = '#444';
+    matCtx.font = `${13 * dpr}px system-ui`;
     matCtx.textAlign = 'center';
+    matCtx.textBaseline = 'middle';
     matCtx.fillText('Add at least 2 points', w/2, h/2);
     return;
   }
 
   const cellW = w / n, cellH = h / n;
 
-  // Find max value for color scaling
   let maxVal = 0;
   for (let i = 0; i < n; i++)
     for (let j = 0; j < n; j++)
       if (transitionMatrix[i][j] > maxVal) maxVal = transitionMatrix[i][j];
 
+  // Draw cells
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
       const v = maxVal > 0 ? transitionMatrix[i][j] / maxVal : 0;
-      // Use a warm color ramp: dark -> red -> orange -> yellow -> white
-      const r = Math.min(255, Math.floor(v * 3 * 255));
-      const g = Math.min(255, Math.floor(Math.max(0, v - 0.33) * 3 * 255));
-      const b = Math.min(255, Math.floor(Math.max(0, v - 0.66) * 3 * 255));
-      matCtx.fillStyle = `rgb(${r},${g},${b})`;
+      const [cr, cg, cb] = inferno(v);
+      matCtx.fillStyle = `rgb(${cr},${cg},${cb})`;
       matCtx.fillRect(j * cellW, i * cellH, cellW + 1, cellH + 1);
     }
   }
 
-  // Grid lines for small matrices
-  if (n <= 30) {
-    matCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+  // Highlight row/col on hover
+  if (hoveredMatCell) {
+    const {row, col} = hoveredMatCell;
+    matCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+    matCtx.lineWidth = dpr;
+    // Highlight column
+    matCtx.strokeRect(col * cellW, 0, cellW, h);
+    // Highlight row
+    matCtx.strokeRect(0, row * cellH, w, cellH);
+    // Highlight cell
+    matCtx.strokeStyle = '#fff';
+    matCtx.lineWidth = 2 * dpr;
+    matCtx.strokeRect(col * cellW, row * cellH, cellW, cellH);
+  }
+
+  // Grid for small matrices
+  if (n <= 40) {
+    matCtx.strokeStyle = 'rgba(255,255,255,0.05)';
     matCtx.lineWidth = dpr * 0.5;
     for (let i = 0; i <= n; i++) {
       matCtx.beginPath();
@@ -403,23 +734,50 @@ function renderMatrix() {
       matCtx.stroke();
     }
   }
+
+  // Index labels for very small matrices
+  if (n <= 20 && cellW > 16 * dpr) {
+    matCtx.textAlign = 'center';
+    matCtx.textBaseline = 'middle';
+    matCtx.font = `${Math.min(9, cellW / dpr / 2.5) * dpr}px system-ui`;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const v = maxVal > 0 ? transitionMatrix[i][j] / maxVal : 0;
+        matCtx.fillStyle = v > 0.5 ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.3)';
+        matCtx.fillText(transitionMatrix[i][j].toFixed(2), j*cellW + cellW/2, i*cellH + cellH/2);
+      }
+    }
+  }
 }
 
 function renderData() {
   const w = dataCanvas.width, h = dataCanvas.height;
   const dpr = devicePixelRatio;
   dataCtx.clearRect(0, 0, w, h);
-  dataCtx.fillStyle = '#1a1a2e';
+  dataCtx.fillStyle = '#0f0f1a';
   dataCtx.fillRect(0, 0, w, h);
+
+  // Subtle grid
+  dataCtx.strokeStyle = 'rgba(255,255,255,0.03)';
+  dataCtx.lineWidth = dpr;
+  const gridStep = 50 * dpr;
+  for (let x = gridStep; x < w; x += gridStep) {
+    dataCtx.beginPath(); dataCtx.moveTo(x, 0); dataCtx.lineTo(x, h); dataCtx.stroke();
+  }
+  for (let y = gridStep; y < h; y += gridStep) {
+    dataCtx.beginPath(); dataCtx.moveTo(0, y); dataCtx.lineTo(w, y); dataCtx.stroke();
+  }
 
   const n = points.length;
   if (n === 0) {
-    dataCtx.fillStyle = '#555';
+    dataCtx.fillStyle = '#444';
     dataCtx.font = `${14 * dpr}px system-ui`;
     dataCtx.textAlign = 'center';
+    dataCtx.textBaseline = 'middle';
     dataCtx.fillText('Click to add points', w/2, h/2);
+    dataCtx.fillStyle = '#333';
     dataCtx.font = `${11 * dpr}px system-ui`;
-    dataCtx.fillText('Right-click to delete, drag to move', w/2, h/2 + 20*dpr);
+    dataCtx.fillText('Right-click to delete \u2022 Drag to move', w/2, h/2 + 22*dpr);
     return;
   }
 
@@ -430,74 +788,113 @@ function renderData() {
       for (let j = i+1; j < n; j++)
         if (rawWeights[i][j] > maxW) maxW = rawWeights[i][j];
 
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const wt = rawWeights[i][j];
-        if (wt <= 0) continue;
-        const alpha = maxW > 0 ? (wt / maxW) * 0.5 : 0;
-        if (alpha < 0.01) continue;
-        // Color: warm tone matching the heatmap
-        const v = maxW > 0 ? wt / maxW : 0;
-        const r = Math.min(255, Math.floor(v * 3 * 255));
-        const g = Math.min(255, Math.floor(Math.max(0, v - 0.33) * 3 * 255));
-        const b = Math.min(255, Math.floor(Math.max(0, v - 0.66) * 3 * 255));
-        dataCtx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
-        dataCtx.lineWidth = dpr * (0.5 + 2 * (wt / maxW));
-        dataCtx.beginPath();
-        dataCtx.moveTo(points[i].x * w, points[i].y * h);
-        dataCtx.lineTo(points[j].x * w, points[j].y * h);
-        dataCtx.stroke();
+    if (maxW > 0) {
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const wt = rawWeights[i][j];
+          if (wt <= 0) continue;
+          const nv = wt / maxW;
+
+          // If hovering a point, dim non-connected edges
+          let alpha;
+          if (hoveredPoint >= 0) {
+            if (i === hoveredPoint || j === hoveredPoint) {
+              alpha = 0.15 + nv * 0.75;
+            } else {
+              alpha = nv * 0.06;
+            }
+          } else {
+            alpha = nv * 0.35;
+          }
+          if (alpha < 0.005) continue;
+
+          const [cr, cg, cb] = inferno(nv);
+          dataCtx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha})`;
+          dataCtx.lineWidth = dpr * (0.5 + 2.5 * nv);
+          dataCtx.beginPath();
+          dataCtx.moveTo(points[i].x * w, points[i].y * h);
+          dataCtx.lineTo(points[j].x * w, points[j].y * h);
+          dataCtx.stroke();
+        }
       }
     }
   }
 
   // Draw points
-  const radius = 8 * dpr;
+  const baseRadius = 9 * dpr;
   for (let i = 0; i < n; i++) {
     const p = points[i];
     const px = p.x * w, py = p.y * h;
+    const isHovered = i === hoveredPoint;
+    const radius = isHovered ? baseRadius * 1.3 : baseRadius;
 
-    // Determine fill color
+    // Glow for hovered point
+    if (isHovered) {
+      const grad = dataCtx.createRadialGradient(px, py, radius, px, py, radius * 3);
+      grad.addColorStop(0, 'rgba(233,69,96,0.25)');
+      grad.addColorStop(1, 'rgba(233,69,96,0)');
+      dataCtx.fillStyle = grad;
+      dataCtx.beginPath();
+      dataCtx.arc(px, py, radius * 3, 0, Math.PI * 2);
+      dataCtx.fill();
+    }
+
+    // Determine fill
     let fill;
-    if (p.score !== null) {
+    if (p.score !== null && iteration > 0) {
       if (hardDisplay) {
-        // Hard: threshold at 0 to pick black or white
-        fill = p.score >= 0 ? '#ffffff' : '#000000';
+        fill = p.score >= 0 ? '#ffffff' : '#111111';
       } else {
-        // Soft: map score from [-1,1] to grayscale [0,255]
-        const gray = Math.round(((p.score + 1) / 2) * 255);
-        fill = `rgb(${gray},${gray},${gray})`;
+        fill = scoreColor(p.score);
       }
     } else if (p.label === 1) {
       fill = '#ffffff';
     } else if (p.label === -1) {
-      fill = '#000000';
+      fill = '#111111';
     } else {
-      fill = '#808080';
+      fill = '#555';
     }
+
+    // Shadow
+    dataCtx.shadowColor = 'rgba(0,0,0,0.4)';
+    dataCtx.shadowBlur = 6 * dpr;
+    dataCtx.shadowOffsetY = 2 * dpr;
 
     dataCtx.beginPath();
     dataCtx.arc(px, py, radius, 0, Math.PI * 2);
     dataCtx.fillStyle = fill;
     dataCtx.fill();
 
-    // Border: labeled points get a colored ring
+    dataCtx.shadowColor = 'transparent';
+    dataCtx.shadowBlur = 0;
+    dataCtx.shadowOffsetY = 0;
+
+    // Border ring
     if (p.label === 1) {
+      dataCtx.strokeStyle = 'var(--positive)';
       dataCtx.strokeStyle = '#4fc3f7';
       dataCtx.lineWidth = 2.5 * dpr;
     } else if (p.label === -1) {
       dataCtx.strokeStyle = '#e94560';
       dataCtx.lineWidth = 2.5 * dpr;
     } else {
-      dataCtx.strokeStyle = '#666';
+      dataCtx.strokeStyle = isHovered ? '#999' : '#444';
       dataCtx.lineWidth = 1.5 * dpr;
     }
     dataCtx.stroke();
 
-    // Index label for small datasets
-    if (n <= 30) {
-      dataCtx.fillStyle = p.label === -1 || (p.score !== null && p.score < -0.2) ? '#fff' : '#000';
-      dataCtx.font = `bold ${9 * dpr}px system-ui`;
+    // Label indicator for labeled points
+    if (p.label !== 0) {
+      dataCtx.font = `bold ${10 * dpr}px system-ui`;
+      dataCtx.textAlign = 'center';
+      dataCtx.textBaseline = 'middle';
+      dataCtx.fillStyle = p.label === 1 ? '#000' : '#fff';
+      dataCtx.fillText(p.label === 1 ? '+' : '\u2013', px, py);
+    } else if (n <= 30) {
+      // Index for unlabeled
+      const brightness = p.score !== null ? (p.score + 1) / 2 : 0.35;
+      dataCtx.fillStyle = brightness > 0.5 ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.6)';
+      dataCtx.font = `${8 * dpr}px system-ui`;
       dataCtx.textAlign = 'center';
       dataCtx.textBaseline = 'middle';
       dataCtx.fillText(i.toString(), px, py);
@@ -505,73 +902,170 @@ function renderData() {
   }
 }
 
-// --- Presets ---
+function renderChart() {
+  const w = chartCanvas.width, h = chartCanvas.height;
+  const dpr = devicePixelRatio;
+  chartCtx.clearRect(0, 0, w, h);
+
+  if (scoreHistory.length < 2) {
+    chartCtx.fillStyle = '#333';
+    chartCtx.font = `${9 * dpr}px system-ui`;
+    chartCtx.textAlign = 'center';
+    chartCtx.textBaseline = 'middle';
+    chartCtx.fillText('Run steps to see history', w/2, h/2);
+    return;
+  }
+
+  const pad = { l: 5*dpr, r: 5*dpr, t: 5*dpr, b: 5*dpr };
+  const cw = w - pad.l - pad.r;
+  const ch = h - pad.t - pad.b;
+
+  // Draw min/max band
+  chartCtx.beginPath();
+  for (let i = 0; i < scoreHistory.length; i++) {
+    const x = pad.l + (i / (scoreHistory.length - 1)) * cw;
+    const y = pad.t + (1 - (scoreHistory[i].max + 1) / 2) * ch;
+    i === 0 ? chartCtx.moveTo(x, y) : chartCtx.lineTo(x, y);
+  }
+  for (let i = scoreHistory.length - 1; i >= 0; i--) {
+    const x = pad.l + (i / (scoreHistory.length - 1)) * cw;
+    const y = pad.t + (1 - (scoreHistory[i].min + 1) / 2) * ch;
+    chartCtx.lineTo(x, y);
+  }
+  chartCtx.closePath();
+  chartCtx.fillStyle = 'rgba(79,195,247,0.1)';
+  chartCtx.fill();
+
+  // Zero line
+  const zeroY = pad.t + ch / 2;
+  chartCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+  chartCtx.lineWidth = dpr;
+  chartCtx.setLineDash([3*dpr, 3*dpr]);
+  chartCtx.beginPath();
+  chartCtx.moveTo(pad.l, zeroY);
+  chartCtx.lineTo(pad.l + cw, zeroY);
+  chartCtx.stroke();
+  chartCtx.setLineDash([]);
+
+  // Average line
+  chartCtx.strokeStyle = '#4fc3f7';
+  chartCtx.lineWidth = 1.5 * dpr;
+  chartCtx.beginPath();
+  for (let i = 0; i < scoreHistory.length; i++) {
+    const x = pad.l + (i / (scoreHistory.length - 1)) * cw;
+    const y = pad.t + (1 - (scoreHistory[i].avg + 1) / 2) * ch;
+    i === 0 ? chartCtx.moveTo(x, y) : chartCtx.lineTo(x, y);
+  }
+  chartCtx.stroke();
+}
+
+// ========== PRESETS ==========
 function addPreset(pts) {
+  if (autoPlay) toggleAutoPlay();
   points = pts;
-  recompute(); render();
+  iteration = 0; scoreHistory = [];
+  recompute(); updateStatus(); render();
 }
 
 document.getElementById('presetTwo').onclick = () => {
   const pts = [];
-  // Cluster A (positive seeds + unlabeled)
-  pts.push({ x: 0.2, y: 0.35, label: 1, score: null });
-  for (let i = 0; i < 8; i++) {
+  pts.push({ x: 0.2, y: 0.35, label: 1, score: null, prevScore: null });
+  for (let i = 0; i < 10; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const r = 0.03 + Math.random() * 0.08;
-    pts.push({ x: 0.25 + Math.cos(angle)*r, y: 0.4 + Math.sin(angle)*r, label: 0, score: null });
+    const r = 0.03 + Math.random() * 0.09;
+    pts.push({ x: 0.25 + Math.cos(angle)*r, y: 0.4 + Math.sin(angle)*r, label: 0, score: null, prevScore: null });
   }
-  // Cluster B (negative seeds + unlabeled)
-  pts.push({ x: 0.8, y: 0.65, label: -1, score: null });
-  for (let i = 0; i < 8; i++) {
+  pts.push({ x: 0.8, y: 0.65, label: -1, score: null, prevScore: null });
+  for (let i = 0; i < 10; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const r = 0.03 + Math.random() * 0.08;
-    pts.push({ x: 0.75 + Math.cos(angle)*r, y: 0.6 + Math.sin(angle)*r, label: 0, score: null });
+    const r = 0.03 + Math.random() * 0.09;
+    pts.push({ x: 0.75 + Math.cos(angle)*r, y: 0.6 + Math.sin(angle)*r, label: 0, score: null, prevScore: null });
   }
   addPreset(pts);
 };
 
 document.getElementById('presetMoons').onclick = () => {
   const pts = [];
-  const n = 15;
-  // Upper moon
+  const n = 18;
   for (let i = 0; i < n; i++) {
     const angle = Math.PI * i / (n - 1);
-    const x = 0.3 + 0.2 * Math.cos(angle) + (Math.random()-0.5)*0.02;
-    const y = 0.5 - 0.15 * Math.sin(angle) + (Math.random()-0.5)*0.02;
-    pts.push({ x, y, label: i === 0 ? 1 : 0, score: null });
+    const x = 0.3 + 0.2 * Math.cos(angle) + (Math.random()-0.5)*0.015;
+    const y = 0.5 - 0.18 * Math.sin(angle) + (Math.random()-0.5)*0.015;
+    pts.push({ x, y, label: i === 0 ? 1 : 0, score: null, prevScore: null });
   }
-  // Lower moon
   for (let i = 0; i < n; i++) {
     const angle = Math.PI + Math.PI * i / (n - 1);
-    const x = 0.5 + 0.2 * Math.cos(angle) + (Math.random()-0.5)*0.02;
-    const y = 0.5 - 0.15 * Math.sin(angle) + (Math.random()-0.5)*0.02;
-    pts.push({ x, y, label: i === 0 ? -1 : 0, score: null });
+    const x = 0.5 + 0.2 * Math.cos(angle) + (Math.random()-0.5)*0.015;
+    const y = 0.5 - 0.18 * Math.sin(angle) + (Math.random()-0.5)*0.015;
+    pts.push({ x, y, label: i === 0 ? -1 : 0, score: null, prevScore: null });
   }
   addPreset(pts);
 };
 
 document.getElementById('presetSpiral').onclick = () => {
   const pts = [];
-  const n = 20;
+  const n = 24;
   for (let i = 0; i < n; i++) {
-    const t = i / n * 2 * Math.PI;
-    const r = 0.05 + 0.15 * (i / n);
-    const x = 0.5 + r * Math.cos(t) + (Math.random()-0.5)*0.015;
-    const y = 0.5 + r * Math.sin(t) + (Math.random()-0.5)*0.015;
-    pts.push({ x, y, label: i === 0 ? 1 : 0, score: null });
+    const t = i / n * 2.5 * Math.PI;
+    const r = 0.04 + 0.16 * (i / n);
+    const x = 0.5 + r * Math.cos(t) + (Math.random()-0.5)*0.012;
+    const y = 0.5 + r * Math.sin(t) + (Math.random()-0.5)*0.012;
+    pts.push({ x, y, label: i === 0 ? 1 : 0, score: null, prevScore: null });
   }
   for (let i = 0; i < n; i++) {
-    const t = i / n * 2 * Math.PI + Math.PI;
-    const r = 0.05 + 0.15 * (i / n);
-    const x = 0.5 + r * Math.cos(t) + (Math.random()-0.5)*0.015;
-    const y = 0.5 + r * Math.sin(t) + (Math.random()-0.5)*0.015;
-    pts.push({ x, y, label: i === 0 ? -1 : 0, score: null });
+    const t = i / n * 2.5 * Math.PI + Math.PI;
+    const r = 0.04 + 0.16 * (i / n);
+    const x = 0.5 + r * Math.cos(t) + (Math.random()-0.5)*0.012;
+    const y = 0.5 + r * Math.sin(t) + (Math.random()-0.5)*0.012;
+    pts.push({ x, y, label: i === 0 ? -1 : 0, score: null, prevScore: null });
   }
   addPreset(pts);
 };
 
-// --- Init ---
-requestAnimationFrame(() => { resize(); });
+document.getElementById('presetBridge').onclick = () => {
+  const pts = [];
+  // Two clusters connected by a narrow bridge
+  // Cluster left
+  pts.push({ x: 0.18, y: 0.5, label: 1, score: null, prevScore: null });
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2, r = 0.02 + Math.random() * 0.07;
+    pts.push({ x: 0.2 + Math.cos(a)*r, y: 0.5 + Math.sin(a)*r, label: 0, score: null, prevScore: null });
+  }
+  // Cluster right
+  pts.push({ x: 0.82, y: 0.5, label: -1, score: null, prevScore: null });
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2, r = 0.02 + Math.random() * 0.07;
+    pts.push({ x: 0.8 + Math.cos(a)*r, y: 0.5 + Math.sin(a)*r, label: 0, score: null, prevScore: null });
+  }
+  // Bridge
+  for (let i = 0; i < 5; i++) {
+    const t = (i + 1) / 6;
+    pts.push({ x: 0.2 + t * 0.6, y: 0.5 + (Math.random()-0.5)*0.03, label: 0, score: null, prevScore: null });
+  }
+  addPreset(pts);
+};
+
+document.getElementById('presetRing').onclick = () => {
+  const pts = [];
+  // Inner cluster (positive)
+  pts.push({ x: 0.5, y: 0.5, label: 1, score: null, prevScore: null });
+  for (let i = 0; i < 6; i++) {
+    const a = Math.PI * 2 * i / 6;
+    pts.push({ x: 0.5 + 0.05*Math.cos(a), y: 0.5 + 0.05*Math.sin(a), label: 0, score: null, prevScore: null });
+  }
+  // Outer ring (negative)
+  const nRing = 16;
+  for (let i = 0; i < nRing; i++) {
+    const a = Math.PI * 2 * i / nRing;
+    const r = 0.2 + (Math.random()-0.5)*0.03;
+    const label = i === 0 ? -1 : 0;
+    pts.push({ x: 0.5 + r*Math.cos(a), y: 0.5 + r*Math.sin(a), label, score: null, prevScore: null });
+  }
+  addPreset(pts);
+};
+
+// ========== INIT ==========
+requestAnimationFrame(() => { resize(); updateStatus(); });
 </script>
 </body>
 </html>
