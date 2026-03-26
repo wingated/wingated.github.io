@@ -138,7 +138,7 @@
   <div class="sep"></div>
   <div class="ctrl-group">
     <label>Temp</label>
-    <input type="range" id="tempSlider" min="0.01" max="5" step="0.01" value="1.0">
+    <input type="range" id="tempSlider" min="0" max="1" step="0.001" value="0.5">
     <span class="val" id="tempVal">1.00</span>
   </div>
   <div class="ctrl-group">
@@ -286,9 +286,15 @@ window.addEventListener('resize', resize);
 // ========== CONTROLS ==========
 const tempSlider = document.getElementById('tempSlider');
 const kSlider = document.getElementById('kSlider');
+const logTempMin = Math.log(0.001), logTempMax = Math.log(5);
+function sliderToTemp(v) { return Math.exp(logTempMin + v * (logTempMax - logTempMin)); }
+function tempToSlider(t) { return (Math.log(t) - logTempMin) / (logTempMax - logTempMin); }
+T = sliderToTemp(parseFloat(tempSlider.value));
+document.getElementById('tempVal').textContent = T.toFixed(3);
+
 tempSlider.addEventListener('input', () => {
-  T = parseFloat(tempSlider.value);
-  document.getElementById('tempVal').textContent = T.toFixed(2);
+  T = sliderToTemp(parseFloat(tempSlider.value));
+  document.getElementById('tempVal').textContent = T < 0.1 ? T.toFixed(3) : T.toFixed(2);
   recompute(); render();
 });
 kSlider.addEventListener('input', () => {
