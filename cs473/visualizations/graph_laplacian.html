@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graph Laplacian Eigenvector Visualizer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+.toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  background: #16213e; border-bottom: 1px solid #0f3460; flex-wrap: wrap;
+}
+.toolbar button {
+  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #1a1a40; color: #e0e0e0; cursor: pointer; font-size: 13px;
+  transition: background 0.15s;
+}
+.toolbar button:hover { background: #0f3460; }
+.toolbar button.primary { background: #e94560; border-color: #e94560; font-weight: 600; }
+.toolbar button.primary:hover { background: #c73e54; }
+.toolbar .sep { width: 1px; height: 24px; background: #0f3460; margin: 0 4px; }
+.toolbar label { font-size: 13px; color: #aaa; }
+.toolbar select, .toolbar input[type=number] {
+  padding: 4px 8px; border: 1px solid #0f3460; border-radius: 4px;
+  background: #1a1a40; color: #e0e0e0; font-size: 13px;
+}
+
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* Left pane */
+.left-pane {
+  flex: 1; display: flex; flex-direction: column; border-right: 1px solid #0f3460;
+  min-width: 0;
+}
+.left-pane h3 { padding: 8px 12px; font-size: 14px; color: #aaa; background: #16213e; }
+.left-pane .hint { padding: 4px 12px; font-size: 11px; color: #666; background: #16213e; }
+#graphCanvas { flex: 1; cursor: crosshair; display: block; }
+
+/* Right pane */
+.right-pane {
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
+}
+.right-pane h3 { padding: 8px 12px; font-size: 14px; color: #aaa; background: #16213e; }
+#eigenContainer {
+  flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-wrap: wrap;
+  gap: 12px; align-content: flex-start;
+}
+.eigen-plot {
+  background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+  width: calc(50% - 6px); min-height: 260px; position: relative; overflow: hidden;
+}
+.eigen-plot canvas { display: block; width: 100%; height: 100%; }
+.eigen-label {
+  position: absolute; top: 6px; left: 10px; font-size: 12px; color: #aaa;
+  pointer-events: none;
+}
+
+/* Mode indicator */
+.mode-indicator {
+  padding: 4px 12px; font-size: 12px; font-weight: 600;
+  background: #0f3460; text-align: center;
+}
+.mode-indicator.add-node { color: #53d769; }
+.mode-indicator.add-edge { color: #ffd60a; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="primary" onclick="computeEigenvectors()">Compute Eigenvectors</button>
+  <div class="sep"></div>
+  <label>Mode:</label>
+  <button id="btnAddNode" onclick="setMode('node')" style="background:#0f3460">Add Nodes</button>
+  <button id="btnAddEdge" onclick="setMode('edge')">Add Edges</button>
+  <div class="sep"></div>
+  <label>Quick graphs:</label>
+  <button onclick="quickGrid()">Grid</button>
+  <button onclick="quickLine()">Line</button>
+  <button onclick="quickRing()">Ring</button>
+  <button onclick="quickMaze()">Maze</button>
+  <button onclick="quickTwoCluster()">Two Clusters</button>
+  <button onclick="quickElephant()">Elephant</button>
+  <div class="sep"></div>
+  <label>Top k:</label>
+  <input type="number" id="topK" value="8" min="1" max="50" style="width:50px">
+  <div class="sep"></div>
+  <label>Height:</label>
+  <input type="range" id="heightScale" min="0" max="100" value="50" style="width:100px" oninput="onHeightChange()">
+  <span id="heightLabel" style="font-size:12px;color:#aaa;min-width:32px">0.40</span>
+  <div class="sep"></div>
+  <button onclick="clearAll()">Clear All</button>
+</div>
+
+<div class="main">
+  <div class="left-pane">
+    <h3>Graph Editor</h3>
+    <div class="hint" id="hintText">Click to place nodes. Right-click a node to delete it. Switch to "Add Edges" to connect them.</div>
+    <div class="mode-indicator add-node" id="modeIndicator">MODE: ADD NODES</div>
+    <canvas id="graphCanvas"></canvas>
+  </div>
+  <div class="right-pane">
+    <h3>Eigenvectors of Graph Laplacian (L = D - A)</h3>
+    <div id="eigenContainer">
+      <div style="padding:40px;color:#555;text-align:center;width:100%;">
+        Build a graph on the left, then click <b>Compute Eigenvectors</b>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ STATE ============
+let nodes = [];       // [{x, y, id}]
+let edges = [];       // [{a, b}]  indices into nodes
+let mode = 'node';    // 'node' | 'edge'
+let edgeStart = null; // index of first node in edge-add
+let nextId = 0;
+let hoveredNode = -1;
+let draggingNode = -1;
+let dragOffset = {x:0, y:0};
+
+const canvas = document.getElementById('graphCanvas');
+const ctx = canvas.getContext('2d');
+
+// ============ CANVAS RESIZE ============
+function resizeCanvas() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  const h = r.height - canvas.offsetTop + canvas.parentElement.offsetTop;
+  canvas.width = r.width * devicePixelRatio;
+  canvas.height = Math.max(100, (r.height - 60)) * devicePixelRatio;
+  canvas.style.width = r.width + 'px';
+  canvas.style.height = Math.max(100, (r.height - 60)) + 'px';
+  draw();
+}
+window.addEventListener('resize', resizeCanvas);
+setTimeout(resizeCanvas, 0);
+
+// ============ DRAWING ============
+const NODE_RADIUS = 7;
+
+function draw() {
+  const w = canvas.width, h = canvas.height;
+  const dpr = devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+
+  // edges
+  ctx.strokeStyle = '#3a6ea5';
+  ctx.lineWidth = 2 * dpr;
+  for (const e of edges) {
+    const a = nodes[e.a], b = nodes[e.b];
+    ctx.beginPath();
+    ctx.moveTo(a.x * dpr, a.y * dpr);
+    ctx.lineTo(b.x * dpr, b.y * dpr);
+    ctx.stroke();
+  }
+
+  // nodes
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    ctx.beginPath();
+    ctx.arc(n.x * dpr, n.y * dpr, NODE_RADIUS * dpr, 0, Math.PI * 2);
+    if (i === edgeStart) {
+      ctx.fillStyle = '#ffd60a';
+    } else if (i === hoveredNode) {
+      ctx.fillStyle = '#e94560';
+    } else {
+      ctx.fillStyle = '#53d769';
+    }
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.stroke();
+
+    // label
+    ctx.fillStyle = '#aaa';
+    ctx.font = `${10 * dpr}px sans-serif`;
+    ctx.fillText(i, (n.x + 10) * dpr, (n.y + 4) * dpr);
+  }
+}
+
+// ============ INTERACTION ============
+function getMousePos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function findNode(pos, radius = 14) {
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const dx = nodes[i].x - pos.x, dy = nodes[i].y - pos.y;
+    if (dx*dx + dy*dy < radius*radius) return i;
+  }
+  return -1;
+}
+
+function findEdge(pos) {
+  const threshold = 8;
+  for (let i = 0; i < edges.length; i++) {
+    const a = nodes[edges[i].a], b = nodes[edges[i].b];
+    const d = pointToSegDist(pos, a, b);
+    if (d < threshold) return i;
+  }
+  return -1;
+}
+
+function pointToSegDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx*dx + dy*dy;
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x)*dx + (p.y - a.y)*dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t*dx), p.y - (a.y + t*dy));
+}
+
+function edgeExists(a, b) {
+  return edges.some(e => (e.a === a && e.b === b) || (e.a === b && e.b === a));
+}
+
+canvas.addEventListener('mousedown', e => {
+  const pos = getMousePos(e);
+  const ni = findNode(pos);
+
+  if (mode === 'node') {
+    if (ni >= 0) {
+      draggingNode = ni;
+      dragOffset = { x: nodes[ni].x - pos.x, y: nodes[ni].y - pos.y };
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', e => {
+  const pos = getMousePos(e);
+
+  if (mode === 'node') {
+    if (draggingNode >= 0) {
+      // was it a drag or a click?
+      const n = nodes[draggingNode];
+      const dx = n.x - (pos.x + dragOffset.x - dragOffset.x); // effectively just check position didn't change much
+      draggingNode = -1;
+      draw();
+      return;
+    }
+    // click on empty space -> add node
+    if (findNode(pos) < 0) {
+      nodes.push({ x: pos.x, y: pos.y, id: nextId++ });
+      draw();
+    }
+  } else if (mode === 'edge') {
+    const ni = findNode(pos);
+    if (ni >= 0) {
+      if (edgeStart === null) {
+        edgeStart = ni;
+      } else {
+        if (ni !== edgeStart) {
+          if (edgeExists(edgeStart, ni)) {
+            edges = edges.filter(e => !((e.a===edgeStart&&e.b===ni)||(e.a===ni&&e.b===edgeStart)));
+          } else {
+            edges.push({ a: edgeStart, b: ni });
+          }
+        }
+        edgeStart = null;
+      }
+    } else {
+      // clicked on empty area in edge mode - check if clicking on edge to remove
+      const ei = findEdge(pos);
+      if (ei >= 0) {
+        edges.splice(ei, 1);
+      }
+      edgeStart = null;
+    }
+    draw();
+  }
+});
+
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const pos = getMousePos(e);
+  const ni = findNode(pos);
+  if (ni >= 0) {
+    // remove all edges referencing this node
+    edges = edges.filter(edge => edge.a !== ni && edge.b !== ni);
+    // remap edge indices
+    edges = edges.map(edge => ({
+      a: edge.a > ni ? edge.a - 1 : edge.a,
+      b: edge.b > ni ? edge.b - 1 : edge.b,
+    }));
+    nodes.splice(ni, 1);
+    if (edgeStart === ni) edgeStart = null;
+    else if (edgeStart !== null && edgeStart > ni) edgeStart--;
+    hoveredNode = -1;
+    draw();
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const pos = getMousePos(e);
+  if (draggingNode >= 0) {
+    nodes[draggingNode].x = pos.x + dragOffset.x;
+    nodes[draggingNode].y = pos.y + dragOffset.y;
+    draw();
+    return;
+  }
+  hoveredNode = findNode(pos);
+  draw();
+});
+
+// ============ MODE ============
+function setMode(m) {
+  mode = m;
+  edgeStart = null;
+  document.getElementById('btnAddNode').style.background = m === 'node' ? '#0f3460' : '';
+  document.getElementById('btnAddEdge').style.background = m === 'edge' ? '#0f3460' : '';
+  const ind = document.getElementById('modeIndicator');
+  if (m === 'node') {
+    ind.textContent = 'MODE: ADD NODES';
+    ind.className = 'mode-indicator add-node';
+    document.getElementById('hintText').textContent = 'Click to place nodes. Drag to move. Right-click a node to delete it. Switch to "Add Edges" to connect them.';
+  } else {
+    ind.textContent = 'MODE: ADD/REMOVE EDGES';
+    ind.className = 'mode-indicator add-edge';
+    document.getElementById('hintText').textContent = 'Click two nodes to add/toggle an edge. Click an edge to remove it. Right-click a node to delete it.';
+  }
+  draw();
+}
+
+// ============ CLEAR ============
+function clearAll() {
+  nodes = []; edges = []; edgeStart = null; nextId = 0; hoveredNode = -1;
+  document.getElementById('eigenContainer').innerHTML =
+    '<div style="padding:40px;color:#555;text-align:center;width:100%;">Build a graph on the left, then click <b>Compute Eigenvectors</b>.</div>';
+  draw();
+}
+
+// ============ QUICK GRAPHS ============
+function getCanvasSize() {
+  return { w: canvas.clientWidth, h: canvas.clientHeight };
+}
+
+function quickGrid() {
+  clearAll();
+  const { w, h } = getCanvasSize();
+  const rows = 16, cols = 20;
+  const mx = 60, my = 40;
+  const sx = (w - 2*mx) / (cols-1), sy = (h - 2*my) / (rows-1);
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      nodes.push({ x: mx + c*sx, y: my + r*sy, id: nextId++ });
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      const i = r*cols + c;
+      if (c < cols-1) edges.push({ a: i, b: i+1 });
+      if (r < rows-1) edges.push({ a: i, b: i+cols });
+    }
+  draw();
+}
+
+function quickLine() {
+  clearAll();
+  const { w, h } = getCanvasSize();
+  const n = 40, mx = 60;
+  const sx = (w - 2*mx) / (n-1);
+  for (let i = 0; i < n; i++)
+    nodes.push({ x: mx + i*sx, y: h/2, id: nextId++ });
+  for (let i = 0; i < n-1; i++)
+    edges.push({ a: i, b: i+1 });
+  draw();
+}
+
+function quickRing() {
+  clearAll();
+  const { w, h } = getCanvasSize();
+  const n = 48;
+  const cx = w/2, cy = h/2, r = Math.min(w, h) * 0.35;
+  for (let i = 0; i < n; i++) {
+    const a = (2*Math.PI*i)/n - Math.PI/2;
+    nodes.push({ x: cx + r*Math.cos(a), y: cy + r*Math.sin(a), id: nextId++ });
+  }
+  for (let i = 0; i < n; i++)
+    edges.push({ a: i, b: (i+1)%n });
+  draw();
+}
+
+function quickMaze() {
+  clearAll();
+  const { w, h } = getCanvasSize();
+  const rows = 5, cols = 7;
+  const mx = 50, my = 30;
+  const sx = (w - 2*mx)/(cols-1), sy = (h - 2*my)/(rows-1);
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      nodes.push({ x: mx + c*sx, y: my + r*sy, id: nextId++ });
+
+  // generate maze via randomized DFS
+  const visited = new Set();
+  const stack = [0];
+  visited.add(0);
+  const mazeEdges = new Set();
+  function neighbors(i) {
+    const r = Math.floor(i/cols), c = i%cols, out = [];
+    if (r > 0) out.push(i - cols);
+    if (r < rows-1) out.push(i + cols);
+    if (c > 0) out.push(i - 1);
+    if (c < cols-1) out.push(i + 1);
+    return out;
+  }
+  while (stack.length) {
+    const cur = stack[stack.length-1];
+    const unvis = neighbors(cur).filter(n => !visited.has(n));
+    if (unvis.length === 0) { stack.pop(); continue; }
+    const next = unvis[Math.floor(Math.random()*unvis.length)];
+    visited.add(next);
+    mazeEdges.add(`${Math.min(cur,next)}-${Math.max(cur,next)}`);
+    stack.push(next);
+  }
+  // add some extra edges for interest
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      const i = r*cols+c;
+      for (const n of neighbors(i)) {
+        const key = `${Math.min(i,n)}-${Math.max(i,n)}`;
+        if (!mazeEdges.has(key) && Math.random() < 0.15) mazeEdges.add(key);
+      }
+    }
+  for (const key of mazeEdges) {
+    const [a, b] = key.split('-').map(Number);
+    edges.push({ a, b });
+  }
+  draw();
+}
+
+function quickTwoCluster() {
+  clearAll();
+  const { w, h } = getCanvasSize();
+  const nPerCluster = 8;
+  // cluster 1
+  const cx1 = w*0.25, cy1 = h*0.5, cx2 = w*0.75, cy2 = h*0.5;
+  const r = Math.min(w, h) * 0.2;
+  for (let i = 0; i < nPerCluster; i++) {
+    const a = (2*Math.PI*i)/nPerCluster;
+    nodes.push({ x: cx1 + r*Math.cos(a)*0.7 + (Math.random()-0.5)*20, y: cy1 + r*Math.sin(a)*0.7 + (Math.random()-0.5)*20, id: nextId++ });
+  }
+  for (let i = 0; i < nPerCluster; i++) {
+    const a = (2*Math.PI*i)/nPerCluster;
+    nodes.push({ x: cx2 + r*Math.cos(a)*0.7 + (Math.random()-0.5)*20, y: cy2 + r*Math.sin(a)*0.7 + (Math.random()-0.5)*20, id: nextId++ });
+  }
+  // intra-cluster edges (mostly connected)
+  for (let c = 0; c < 2; c++) {
+    const off = c * nPerCluster;
+    for (let i = 0; i < nPerCluster; i++)
+      for (let j = i+1; j < nPerCluster; j++)
+        if (Math.random() < 0.5) edges.push({ a: off+i, b: off+j });
+    // ensure ring connectivity
+    for (let i = 0; i < nPerCluster; i++)
+      if (!edgeExists(off+i, off+(i+1)%nPerCluster))
+        edges.push({ a: off+i, b: off+(i+1)%nPerCluster });
+  }
+  // single bridge edge
+  edges.push({ a: nPerCluster-1, b: nPerCluster });
+  draw();
+}
+
+function quickElephant() {
+  clearAll();
+  const { w, h } = getCanvasSize();
+
+  // Elephant outline as normalized coords [0..1, 0..1], y=0 is top
+  // Facing right, with exaggerated trunk, legs, tail, tusks, big ear
+  const outline = [
+    // top of head
+    [0.52, 0.08], [0.56, 0.06], [0.60, 0.05], [0.65, 0.05], [0.69, 0.06],
+    // forehead down to trunk base
+    [0.72, 0.09], [0.74, 0.13], [0.75, 0.18],
+    // trunk - exaggerated, curling down and forward
+    [0.77, 0.22], [0.80, 0.25], [0.83, 0.27], [0.86, 0.30],
+    [0.89, 0.34], [0.91, 0.38], [0.92, 0.42], [0.92, 0.46],
+    [0.91, 0.50], [0.89, 0.53], [0.86, 0.55], [0.83, 0.54],
+    // trunk tip curls back
+    [0.81, 0.52], [0.80, 0.49],
+    // back up under trunk to mouth area
+    [0.79, 0.46], [0.77, 0.43], [0.75, 0.40],
+    // tusk
+    [0.76, 0.38], [0.78, 0.42], [0.77, 0.45], [0.74, 0.43],
+    // jaw / underside of head
+    [0.73, 0.40], [0.71, 0.38], [0.68, 0.36], [0.65, 0.35],
+    // chest descending to front leg
+    [0.62, 0.38], [0.60, 0.42], [0.59, 0.48],
+    // front leg - exaggerated length
+    [0.59, 0.55], [0.59, 0.62], [0.58, 0.69], [0.57, 0.76],
+    [0.57, 0.82], [0.56, 0.88], [0.56, 0.92],
+    // front foot
+    [0.54, 0.94], [0.52, 0.95], [0.50, 0.94], [0.50, 0.92],
+    // front leg back side going up
+    [0.50, 0.88], [0.50, 0.82], [0.50, 0.76], [0.50, 0.69],
+    [0.49, 0.63], [0.48, 0.58],
+    // belly between front and back legs
+    [0.46, 0.56], [0.43, 0.58], [0.40, 0.60], [0.37, 0.61],
+    [0.34, 0.62], [0.31, 0.61], [0.28, 0.59],
+    // back leg - exaggerated
+    [0.27, 0.62], [0.27, 0.69], [0.27, 0.76], [0.27, 0.82],
+    [0.27, 0.88], [0.27, 0.92],
+    // back foot
+    [0.25, 0.94], [0.23, 0.95], [0.21, 0.94], [0.21, 0.92],
+    // back leg back side going up
+    [0.21, 0.88], [0.21, 0.82], [0.21, 0.76], [0.20, 0.69],
+    [0.19, 0.62], [0.18, 0.57],
+    // rump going up
+    [0.17, 0.52], [0.16, 0.46], [0.15, 0.40], [0.14, 0.34],
+    // tail - exaggerated, going up and back
+    [0.13, 0.30], [0.11, 0.25], [0.09, 0.20], [0.07, 0.16],
+    [0.05, 0.13], [0.04, 0.10], [0.03, 0.08],
+    // tail tuft
+    [0.02, 0.06], [0.04, 0.05], [0.06, 0.07],
+    // tail back toward body
+    [0.07, 0.10], [0.09, 0.14], [0.11, 0.18], [0.13, 0.22],
+    [0.15, 0.26],
+    // back / spine going forward
+    [0.17, 0.24], [0.20, 0.21], [0.23, 0.18], [0.26, 0.16],
+    [0.29, 0.14], [0.32, 0.13], [0.35, 0.12], [0.38, 0.11],
+    // big ear bump
+    [0.41, 0.11], [0.43, 0.13], [0.44, 0.17], [0.45, 0.22],
+    [0.46, 0.27], [0.46, 0.31], [0.45, 0.34],
+    // ear back edge going up
+    [0.47, 0.30], [0.48, 0.25], [0.49, 0.20], [0.49, 0.15],
+    [0.50, 0.11], [0.52, 0.08],
+  ];
+
+  // Scale and center to canvas
+  const pad = 30;
+  const scaleX = (w - 2*pad);
+  const scaleY = (h - 2*pad);
+  const scaledOutline = outline.map(([ox, oy]) => [pad + ox * scaleX, pad + oy * scaleY]);
+
+  // Point-in-polygon test (ray casting)
+  function pointInPolygon(px, py, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1];
+      const xj = poly[j][0], yj = poly[j][1];
+      if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi))
+        inside = !inside;
+    }
+    return inside;
+  }
+
+  // Place boundary nodes (subdivide outline for more resolution)
+  function subdividePath(path, maxDist) {
+    const result = [];
+    for (let i = 0; i < path.length; i++) {
+      const a = path[i], b = path[(i+1) % path.length];
+      result.push(a);
+      const d = Math.hypot(b[0]-a[0], b[1]-a[1]);
+      const n = Math.ceil(d / maxDist);
+      for (let j = 1; j < n; j++) {
+        const t = j / n;
+        result.push([a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]);
+      }
+    }
+    return result;
+  }
+
+  const boundaryPts = subdividePath(scaledOutline, 22);
+
+  // Fill interior with grid points
+  const allPts = [...boundaryPts];
+  const spacing = 25;
+  const minX = pad, maxX = w - pad, minY = pad, maxY = h - pad;
+  for (let y = minY; y <= maxY; y += spacing) {
+    for (let x = minX; x <= maxX; x += spacing) {
+      if (pointInPolygon(x, y, scaledOutline)) {
+        // check not too close to existing boundary point
+        let tooClose = false;
+        for (const bp of boundaryPts) {
+          if (Math.hypot(bp[0]-x, bp[1]-y) < spacing * 0.6) { tooClose = true; break; }
+        }
+        if (!tooClose) allPts.push([x, y]);
+      }
+    }
+  }
+
+  // Delaunay triangulation (Bowyer-Watson)
+  function delaunay(points) {
+    // super triangle
+    const minX = -1000, minY = -1000, maxX = 3000, maxY = 3000;
+    const st = [
+      { x: minX - 10, y: minY - 10 },
+      { x: maxX + 10, y: minY - 10 },
+      { x: (minX + maxX) / 2, y: maxY + 10 }
+    ];
+    let triangles = [{ a: -3, b: -2, c: -1 }]; // indices into virtual array
+
+    const allVerts = points.map(p => ({ x: p[0], y: p[1] }));
+    function getVert(i) {
+      if (i === -3) return st[0];
+      if (i === -2) return st[1];
+      if (i === -1) return st[2];
+      return allVerts[i];
+    }
+
+    function circumCircleContains(tri, px, py) {
+      const a = getVert(tri.a), b = getVert(tri.b), c = getVert(tri.c);
+      const ax = a.x - px, ay = a.y - py;
+      const bx = b.x - px, by = b.y - py;
+      const cx = c.x - px, cy = c.y - py;
+      const det = (ax*ax+ay*ay)*(bx*cy-cx*by) - (bx*bx+by*by)*(ax*cy-cx*ay) + (cx*cx+cy*cy)*(ax*by-bx*ay);
+      // need to check orientation
+      const orient = (a.x-c.x)*(b.y-c.y) - (a.y-c.y)*(b.x-c.x);
+      return orient > 0 ? det > 0 : det < 0;
+    }
+
+    for (let i = 0; i < allVerts.length; i++) {
+      const px = allVerts[i].x, py = allVerts[i].y;
+      const bad = [];
+      for (let t = 0; t < triangles.length; t++) {
+        if (circumCircleContains(triangles[t], px, py)) bad.push(t);
+      }
+      // find boundary polygon of bad triangles
+      const polyEdges = [];
+      for (const t of bad) {
+        const tri = triangles[t];
+        const triEdges = [[tri.a,tri.b],[tri.b,tri.c],[tri.c,tri.a]];
+        for (const [ea, eb] of triEdges) {
+          let shared = false;
+          for (const t2 of bad) {
+            if (t2 === t) continue;
+            const tri2 = triangles[t2];
+            const e2 = [[tri2.a,tri2.b],[tri2.b,tri2.c],[tri2.c,tri2.a]];
+            for (const [fa, fb] of e2) {
+              if ((ea===fa&&eb===fb)||(ea===fb&&eb===fa)) { shared = true; break; }
+            }
+            if (shared) break;
+          }
+          if (!shared) polyEdges.push([ea, eb]);
+        }
+      }
+      // remove bad triangles (in reverse order)
+      bad.sort((a,b) => b-a);
+      for (const t of bad) triangles.splice(t, 1);
+      // create new triangles
+      for (const [ea, eb] of polyEdges) {
+        triangles.push({ a: i, b: ea, c: eb });
+      }
+    }
+
+    // remove triangles that reference super triangle vertices
+    triangles = triangles.filter(t => t.a >= 0 && t.b >= 0 && t.c >= 0);
+    return triangles;
+  }
+
+  const tris = delaunay(allPts);
+
+  // Build nodes and edges from triangulation
+  for (const p of allPts) {
+    nodes.push({ x: p[0], y: p[1], id: nextId++ });
+  }
+  const edgeSet = new Set();
+  for (const t of tris) {
+    const pairs = [[t.a,t.b],[t.b,t.c],[t.c,t.a]];
+    for (const [a,b] of pairs) {
+      const key = Math.min(a,b) + '-' + Math.max(a,b);
+      if (!edgeSet.has(key)) {
+        edgeSet.add(key);
+        // only keep edges where midpoint is inside or near the polygon
+        const mx = (allPts[a][0]+allPts[b][0])/2, my = (allPts[a][1]+allPts[b][1])/2;
+        if (pointInPolygon(mx, my, scaledOutline) || Math.hypot(allPts[a][0]-allPts[b][0], allPts[a][1]-allPts[b][1]) < spacing * 2) {
+          edges.push({ a: Math.min(a,b), b: Math.max(a,b) });
+        }
+      }
+    }
+  }
+
+  draw();
+}
+
+// ============ LINEAR ALGEBRA (pure JS) ============
+
+function buildLaplacian() {
+  const n = nodes.length;
+  const L = Array.from({length: n}, () => new Float64Array(n));
+  for (const e of edges) {
+    L[e.a][e.b] = -1;
+    L[e.b][e.a] = -1;
+    L[e.a][e.a] += 1;
+    L[e.b][e.b] += 1;
+  }
+  return L;
+}
+
+// Jacobi eigenvalue algorithm for symmetric matrices (sweep-based)
+function jacobiEigen(A, maxSweeps = 100) {
+  const n = A.length;
+  const S = A.map(row => Float64Array.from(row));
+  const V = Array.from({length: n}, (_, i) => {
+    const row = new Float64Array(n);
+    row[i] = 1;
+    return row;
+  });
+
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    // compute off-diagonal norm
+    let offNorm = 0;
+    for (let i = 0; i < n; i++)
+      for (let j = i+1; j < n; j++)
+        offNorm += S[i][j] * S[i][j];
+    if (offNorm < 1e-24) break;
+
+    // sweep: rotate every (p,q) pair with p < q
+    for (let p = 0; p < n - 1; p++) {
+      for (let q = p + 1; q < n; q++) {
+        if (Math.abs(S[p][q]) < 1e-14) continue;
+
+        // compute rotation angle
+        const diff = S[q][q] - S[p][p];
+        let t;
+        if (Math.abs(S[p][q]) < 1e-30 * Math.abs(diff)) {
+          t = S[p][q] / diff;
+        } else {
+          const phi = diff / (2 * S[p][q]);
+          t = 1.0 / (Math.abs(phi) + Math.sqrt(phi * phi + 1));
+          if (phi < 0) t = -t;
+        }
+        const c = 1.0 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        const tau = s / (1.0 + c);
+
+        // update matrix S
+        const spq = S[p][q];
+        S[p][q] = 0;
+        S[p][p] -= t * spq;
+        S[q][q] += t * spq;
+
+        for (let r = 0; r < p; r++) {
+          const g = S[r][p], h = S[r][q];
+          S[r][p] = g - s * (h + g * tau);
+          S[r][q] = h + s * (g - h * tau);
+        }
+        for (let r = p + 1; r < q; r++) {
+          const g = S[p][r], h = S[r][q];
+          S[p][r] = g - s * (h + g * tau);
+          S[r][q] = h + s * (g - h * tau);
+        }
+        for (let r = q + 1; r < n; r++) {
+          const g = S[p][r], h = S[q][r];
+          S[p][r] = g - s * (h + g * tau);
+          S[q][r] = h + s * (g - h * tau);
+        }
+
+        // update eigenvectors
+        for (let r = 0; r < n; r++) {
+          const g = V[r][p], h = V[r][q];
+          V[r][p] = g - s * (h + g * tau);
+          V[r][q] = h + s * (g - h * tau);
+        }
+      }
+    }
+  }
+
+  // extract eigenvalues and eigenvectors
+  const eigs = [];
+  for (let i = 0; i < n; i++) {
+    const vec = new Float64Array(n);
+    for (let j = 0; j < n; j++) vec[j] = V[j][i];
+    eigs.push({ value: S[i][i], vector: vec });
+  }
+  eigs.sort((a, b) => a.value - b.value);
+  return eigs;
+}
+
+// ============ EIGENVECTOR COMPUTATION & DISPLAY ============
+
+function computeEigenvectors() {
+  if (nodes.length < 2) {
+    alert('Need at least 2 nodes.');
+    return;
+  }
+  const L = buildLaplacian();
+  const eigs = jacobiEigen(L, 100);
+  const k = Math.min(parseInt(document.getElementById('topK').value) || 8, nodes.length);
+
+  activePlots = [];
+  const container = document.getElementById('eigenContainer');
+  container.innerHTML = '';
+
+  for (let ei = 0; ei < k; ei++) {
+    const div = document.createElement('div');
+    div.className = 'eigen-plot';
+    const cvs = document.createElement('canvas');
+    div.appendChild(cvs);
+    const label = document.createElement('div');
+    label.className = 'eigen-label';
+    label.textContent = `eigvec ${ei}  (lambda = ${eigs[ei].value.toFixed(4)})`;
+    div.appendChild(label);
+    container.appendChild(div);
+
+    requestAnimationFrame(() => render3D(cvs, eigs[ei].vector, ei));
+  }
+}
+
+// ============ 3D RENDERING ============
+
+let activePlots = []; // stores { drawScene } for each plot so slider can trigger redraws
+
+function getHeightScale() {
+  // slider 0..100, midpoint 50 = 0.4 (old default), 100 = 0.8, 0 = 0
+  return (parseFloat(document.getElementById('heightScale').value) / 50) * 0.4;
+}
+
+function onHeightChange() {
+  const s = getHeightScale();
+  document.getElementById('heightLabel').textContent = s.toFixed(2);
+  for (const plot of activePlots) plot.drawScene();
+}
+
+function render3D(cvs, eigvec, index) {
+  const parent = cvs.parentElement;
+  const W = parent.clientWidth, H = parent.clientHeight || 250;
+  const dpr = devicePixelRatio;
+  cvs.width = W * dpr;
+  cvs.height = H * dpr;
+  cvs.style.width = W + 'px';
+  cvs.style.height = H + 'px';
+  const c = cvs.getContext('2d');
+
+  // normalize node positions to [-1,1] using the graph canvas bounds
+  const gw = canvas.clientWidth, gh = canvas.clientHeight;
+  const pts = nodes.map((n, i) => ({
+    x: (n.x / gw) * 2 - 1,
+    y: (n.y / gh) * 2 - 1,
+    zRaw: eigvec[i]
+  }));
+
+  // normalize zRaw to [-1,1] (used for color, independent of height scale)
+  let zMin = Infinity, zMax = -Infinity;
+  for (const p of pts) { zMin = Math.min(zMin, p.zRaw); zMax = Math.max(zMax, p.zRaw); }
+  const zRange = zMax - zMin || 1;
+  for (const p of pts) p.zNorm = ((p.zRaw - zMin) / zRange) * 2 - 1;
+
+  // rotation state
+  let rotY = -0.5, rotX = 0.45;
+  let dragging = false, lastMx, lastMy;
+
+  cvs.addEventListener('mousedown', e => { dragging = true; lastMx = e.clientX; lastMy = e.clientY; });
+  window.addEventListener('mouseup', () => dragging = false);
+  cvs.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    rotY += (e.clientX - lastMx) * 0.01;
+    rotX += (e.clientY - lastMy) * 0.01;
+    rotX = Math.max(-Math.PI/2, Math.min(Math.PI/2, rotX));
+    lastMx = e.clientX; lastMy = e.clientY;
+    drawScene();
+  });
+
+  function project(x, y, z) {
+    let x1 = x * Math.cos(rotY) - z * Math.sin(rotY);
+    let z1 = x * Math.sin(rotY) + z * Math.cos(rotY);
+    let y1 = y * Math.cos(rotX) - z1 * Math.sin(rotX);
+    let z2 = y * Math.sin(rotX) + z1 * Math.cos(rotX);
+    const scale = 0.35 * Math.min(W, H) * dpr;
+    const perspective = 3 / (3 + z2);
+    return {
+      sx: W * dpr / 2 + x1 * scale * perspective,
+      sy: H * dpr / 2 + y1 * scale * perspective,
+      depth: z2
+    };
+  }
+
+  function drawScene() {
+    const hScale = getHeightScale();
+    c.clearRect(0, 0, cvs.width, cvs.height);
+
+    // draw axes
+    const axes = [
+      { from: [-1.2, 0, 0], to: [1.2, 0, 0], color: '#444' },
+      { from: [0, -1.2, 0], to: [0, 1.2, 0], color: '#444' },
+      { from: [0, 0, -1.2], to: [0, 0, 1.2], color: '#444' },
+    ];
+    for (const ax of axes) {
+      const a = project(...ax.from), b = project(...ax.to);
+      c.strokeStyle = ax.color;
+      c.lineWidth = 1 * dpr;
+      c.beginPath(); c.moveTo(a.sx, a.sy); c.lineTo(b.sx, b.sy); c.stroke();
+    }
+
+    // draw "floor" grid (z=0 plane projected)
+    c.strokeStyle = '#222';
+    c.lineWidth = 0.5 * dpr;
+    for (let v = -1; v <= 1; v += 0.5) {
+      const a = project(v, -1, 0), b = project(v, 1, 0);
+      c.beginPath(); c.moveTo(a.sx, a.sy); c.lineTo(b.sx, b.sy); c.stroke();
+      const a2 = project(-1, v, 0), b2 = project(1, v, 0);
+      c.beginPath(); c.moveTo(a2.sx, a2.sy); c.lineTo(b2.sx, b2.sy); c.stroke();
+    }
+
+    // project points and stems (z scaled by slider, color by zNorm)
+    const projected = pts.map((p, i) => {
+      const z = p.zNorm * hScale;
+      const pr = project(p.x, p.y, z);
+      const base = project(p.x, p.y, 0);
+      return { ...pr, base, idx: i, zNorm: p.zNorm };
+    });
+
+    projected.sort((a, b) => b.depth - a.depth);
+
+    // draw edges
+    for (const e of edges) {
+      const pi = projected.find(p => p.idx === e.a);
+      const pj = projected.find(p => p.idx === e.b);
+      c.strokeStyle = 'rgba(58,110,165,0.3)';
+      c.lineWidth = 1 * dpr;
+      c.beginPath();
+      c.moveTo(pi.sx, pi.sy);
+      c.lineTo(pj.sx, pj.sy);
+      c.stroke();
+    }
+
+    // draw stems and points
+    for (const p of projected) {
+      c.strokeStyle = 'rgba(255,255,255,0.15)';
+      c.lineWidth = 1 * dpr;
+      c.setLineDash([3*dpr, 3*dpr]);
+      c.beginPath();
+      c.moveTo(p.base.sx, p.base.sy);
+      c.lineTo(p.sx, p.sy);
+      c.stroke();
+      c.setLineDash([]);
+
+      // color by normalized eigenvector value (unaffected by height slider)
+      const t = (p.zNorm + 1) / 2; // 0..1
+      const r = Math.round(30 + 200 * t);
+      const g = Math.round(80 + 100 * (1 - Math.abs(t - 0.5) * 2));
+      const b = Math.round(230 - 200 * t);
+      c.beginPath();
+      c.arc(p.sx, p.sy, 5 * dpr, 0, Math.PI * 2);
+      c.fillStyle = `rgb(${r},${g},${b})`;
+      c.fill();
+      c.strokeStyle = '#fff';
+      c.lineWidth = 1 * dpr;
+      c.stroke();
+    }
+  }
+
+  activePlots.push({ drawScene });
+  drawScene();
+}
+
+</script>
+</body>
+</html>
