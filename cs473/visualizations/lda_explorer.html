@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LDA Inference Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400;1,6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f2f3f6; --surface:#ffffff; --surface-2:#f7f8fa; --ink:#161a21; --ink-2:#4d5461; --muted:#828a98;
+  --line:#e0e3e9; --line-2:#c9ced8; --accent:#4b44b5; --accent-ink:#ffffff; --accent-soft:#ecebf8;
+  --t1:#2a78d6; --t2:#eb6834; --t3:#1baf7a; --t4:#eda100; --t5:#e87ba4;
+  --bad:#d03b3b; --good:#0a7a0a;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#111317; --surface:#1a1d23; --surface-2:#20242b; --ink:#eef0f3; --ink-2:#b6bcc7; --muted:#7f8794;
+    --line:#2b303a; --line-2:#3a404c; --accent:#a49af0; --accent-ink:#15132b; --accent-soft:#26243d;
+    --t1:#3987e5; --t2:#d95926; --t3:#199e70; --t4:#c98500; --t5:#d55181;
+    --bad:#e66767; --good:#3fbf3f;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#111317; --surface:#1a1d23; --surface-2:#20242b; --ink:#eef0f3; --ink-2:#b6bcc7; --muted:#7f8794;
+  --line:#2b303a; --line-2:#3a404c; --accent:#a49af0; --accent-ink:#15132b; --accent-soft:#26243d;
+  --t1:#3987e5; --t2:#d95926; --t3:#199e70; --t4:#c98500; --t5:#d55181;
+  --bad:#e66767; --good:#3fbf3f;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45;padding-inline:20px;padding-block:18px 48px}
+h1,h2,h3{margin:0;font-family:var(--serif);font-weight:600;text-wrap:balance;line-height:1.15}
+h1{font-size:30px;letter-spacing:-0.01em}
+h2{font-size:17px}
+h3{font-size:15px}
+p{margin:0}
+button{font:inherit;color:inherit}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+i.v{font-family:var(--serif);font-style:italic;font-size:1.08em}
+sub,sup{font-size:.72em;line-height:0}
+
+header.top{display:flex;flex-wrap:wrap;gap:12px 32px;align-items:flex-end;justify-content:space-between;margin-bottom:14px;max-width:1600px;margin-inline:auto}
+header.top .sub{color:var(--ink-2);max-width:62ch;margin-top:4px}
+header.top .sub .cite{color:var(--muted);font-size:12.5px}
+
+.wrap{max-width:1600px;margin-inline:auto;display:grid;gap:14px}
+
+/* ---------- control bar ---------- */
+.controls{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:stretch}
+.controls .cgroup.inf{grid-column:1/-1}
+.eyebrow i.v{text-transform:none;letter-spacing:0}
+.cgroup{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.cgroup .eyebrow{margin-bottom:-2px}
+.crow{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+.ctl{display:flex;flex-direction:column;gap:2px;min-width:96px}
+.ctl label{font-size:12px;color:var(--ink-2);display:flex;justify-content:space-between;gap:8px}
+.ctl label .val{font-family:var(--mono);color:var(--ink);font-size:12px}
+.ctl input[type=range]{width:100%;margin:0;accent-color:var(--accent)}
+.ctl input[type=number]{font:inherit;font-family:var(--mono);font-size:12px;width:100%;padding:3px 6px;border:1px solid var(--line-2);border-radius:5px;background:var(--surface);color:var(--ink)}
+.btn{background:var(--surface);border:1px solid var(--line-2);border-radius:6px;padding:6px 11px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn:focus-visible,input:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn kbd{font-family:var(--mono);font-size:10.5px;color:var(--muted);border:1px solid var(--line-2);border-radius:3px;padding:0 4px;line-height:1.4}
+.btn.primary kbd{color:var(--accent-ink);border-color:color-mix(in oklab,var(--accent-ink) 40%,transparent)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{background:var(--surface);border:0;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:500}
+.seg button+button{border-left:1px solid var(--line-2)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.check{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);cursor:pointer}
+.check input{accent-color:var(--accent);margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:var(--ink-2);align-items:baseline}
+.stats b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+
+/* ---------- main grid ---------- */
+.grid{display:grid;grid-template-columns:330px minmax(0,1fr) 360px;gap:14px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;min-width:0;transition:box-shadow .2s}
+.panel.glow{box-shadow:0 0 0 2px var(--accent)}
+.panel .ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.panel .ph .hint{font-size:12px;color:var(--muted)}
+.col{display:grid;gap:14px;min-width:0}
+
+/* plate */
+.plate svg{width:100%;height:auto;display:block}
+.plate .node circle{fill:var(--surface);stroke:var(--ink);stroke-width:1.5}
+.plate .node.obs circle{fill:var(--line)}
+.plate .node.collapsed circle{stroke-dasharray:3 3;stroke:var(--ink-2)}
+.plate .node text{font-family:var(--serif);font-style:italic;font-size:15px;fill:var(--ink);text-anchor:middle;dominant-baseline:central}
+.plate .node text.sub{font-size:10px;font-style:normal;font-family:var(--sans);fill:var(--muted)}
+.plate .hyper text{font-family:var(--serif);font-style:italic;font-size:15px;fill:var(--ink);text-anchor:middle;dominant-baseline:central}
+.plate .edge{stroke:var(--ink-2);stroke-width:1.3;fill:none;marker-end:url(#arrow)}
+.plate .pl{fill:none;stroke:var(--line-2);stroke-width:1.2;rx:5}
+.plate .pll{font-family:var(--sans);font-size:11px;fill:var(--muted)}
+.plate .node.hl circle{stroke:var(--accent);stroke-width:3;fill:var(--accent-soft)}
+.plate .node.hl text{fill:var(--ink)}
+.plate .node{cursor:pointer}
+.plate .node:hover circle{stroke-width:2.5}
+.plate .caption{font-size:12px;color:var(--ink-2);margin-top:6px}
+.plate .qtitle{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+
+/* prior draws */
+.draws{display:grid;gap:5px}
+.sbar{display:flex;gap:2px;height:14px;border-radius:3px;overflow:hidden;background:var(--surface-2);flex:1;min-width:0}
+.sbar span{display:block;height:100%}
+.drow{display:flex;align-items:center;gap:8px}
+.drow .dl{font-family:var(--mono);font-size:11px;color:var(--muted);width:34px;flex:none}
+.bbar{display:flex;gap:2px;flex:1;height:22px;align-items:flex-end}
+.bbar span{flex:1;background:var(--tc);border-radius:2px 2px 0 0;min-height:1px}
+
+/* documents */
+.docs{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.doc{border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--surface-2);transition:border-color .15s}
+.doc.cur{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.doc-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.doc-h .eyebrow{color:var(--ink-2)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{position:relative;font-family:var(--mono);font-size:12.5px;padding:3px 7px 4px;border-radius:4px;border-bottom:3px solid var(--tc);background:color-mix(in oklab,var(--tc) var(--tint),var(--surface));cursor:default;transition:background .15s;line-height:1.2}
+.chip.cur{outline:2px solid var(--ink);outline-offset:1px;animation:pulse 1s ease-in-out infinite}
+.chip.changed::after{content:"";position:absolute;left:0;right:0;top:-3px;height:2px;background:var(--accent)}
+.chip .truth{position:absolute;top:-4px;right:-4px;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--surface)}
+@keyframes pulse{0%,100%{outline-color:var(--ink)}50%{outline-color:var(--accent)}}
+@media (prefers-reduced-motion:reduce){.chip.cur{animation:none}}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--ink-2);align-items:center}
+.legend .sw{display:inline-block;width:11px;height:11px;border-radius:2px;background:var(--tc);vertical-align:-1px;margin-right:5px}
+.legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--tc);vertical-align:0;margin-right:5px}
+
+/* theta */
+.trow{display:flex;align-items:center;gap:8px;padding:3px 0}
+.trow .tlab{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);width:26px;flex:none}
+.trow.cur .tlab{color:var(--accent);font-weight:500}
+.trow .sbar{height:18px}
+.trow.true .sbar{height:6px;opacity:.85}
+.trow.true .tlab{font-size:9.5px;color:var(--muted);text-align:right}
+.trow .sbar span{position:relative}
+.trow .sbar span:hover{filter:brightness(1.12)}
+.trow.cur .sbar{box-shadow:0 0 0 2px var(--accent)}
+
+/* beta */
+.beta table{border-collapse:collapse;width:100%;table-layout:fixed}
+.beta th{font-weight:500;font-size:11px;color:var(--ink-2);padding:2px 4px;text-align:left}
+.beta th:first-child{width:52px}
+.beta td{padding:1px 4px;vertical-align:middle}
+.beta td.w{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);white-space:nowrap}
+.beta tr.cur td.w{color:var(--accent);font-weight:500}
+.beta tr.cur td .cell{background:var(--accent-soft)}
+.beta .cell{position:relative;height:12px;background:transparent;border-radius:2px}
+.beta .cell .bar{position:absolute;left:0;top:0;bottom:0;background:var(--tc);border-radius:0 3px 3px 0}
+.beta .cell .tick{position:absolute;top:-2px;bottom:-2px;width:0;border-left:2px solid var(--ink);opacity:.6}
+.beta .cell.hlw .bar{filter:brightness(1.15)}
+.beta .cell.hlw::before{content:"";position:absolute;inset:-2px;border:1.5px solid var(--accent);border-radius:3px}
+.beta tr.theme td{font-size:10.5px;color:var(--muted);padding-top:0}
+
+/* step panel */
+.step{display:grid;grid-template-columns:minmax(220px,1.1fr) minmax(260px,1.2fr) minmax(200px,.9fr);gap:16px;align-items:start}
+.step .prose{color:var(--ink-2);display:grid;gap:8px;max-width:52ch}
+.step .prose b{color:var(--ink);font-weight:600}
+.formula{font-family:var(--serif);font-size:16px;background:var(--surface-2);border-radius:6px;padding:8px 12px;line-height:1.7;color:var(--ink)}
+.formula .frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;font-size:.9em;line-height:1.15}
+.formula .frac span:first-child{border-bottom:1px solid var(--ink);padding:0 4px}
+.tbl{border-collapse:collapse;width:100%}
+.tbl th{font-weight:500;font-size:11px;color:var(--muted);text-align:right;padding:2px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl th:first-child,.tbl td:first-child{text-align:left}
+.tbl td{font-family:var(--mono);font-size:12px;text-align:right;padding:3px 6px;border-bottom:1px solid var(--line)}
+.tbl tr.pick td{background:var(--accent-soft);font-weight:500}
+.tbl .sw{display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--tc);margin-right:6px;vertical-align:-1px}
+.dist{display:grid;gap:8px}
+.vbars{display:flex;gap:10px;height:120px;align-items:flex-end;padding:0 6px;border-bottom:1px solid var(--line-2)}
+.vbars .vb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+.vbars .vb .val{font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-bottom:3px}
+.vbars .vb .bar{width:100%;max-width:24px;background:var(--tc);border-radius:4px 4px 0 0;min-height:1px}
+.vbars .vb .ghost{position:absolute;bottom:0;width:100%;max-width:24px;border:1.5px dashed var(--ink-2);border-bottom:0;border-radius:4px 4px 0 0;opacity:.7;pointer-events:none}
+.vbars .vb.pick .bar{outline:2px solid var(--ink);outline-offset:1px}
+.vlabs{display:flex;gap:10px;padding:0 6px}
+.vlabs span{flex:1;text-align:center;font-size:11px;color:var(--ink-2)}
+.cdf{position:relative;margin-top:6px}
+.cdf .sbar{height:14px}
+.cdf .u{position:absolute;top:-6px;width:0;height:26px;border-left:2px solid var(--ink);transform:translateX(-1px)}
+.cdf .u::after{content:"u";position:absolute;top:-14px;left:-4px;font-family:var(--serif);font-style:italic;font-size:12px;color:var(--ink)}
+.cdf .cap{font-size:11px;color:var(--muted);margin-top:4px}
+.step .empty{color:var(--muted);font-style:italic}
+
+/* trace */
+.trace svg{width:100%;height:auto;display:block}
+.trace .ax{stroke:var(--line-2);stroke-width:1}
+.trace .gl{stroke:var(--line);stroke-width:1}
+.trace .ln{stroke:var(--accent);stroke-width:2;fill:none;stroke-linejoin:round;stroke-linecap:round}
+.trace .ar{fill:var(--accent);opacity:.08}
+.trace text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+.trace .end{fill:var(--accent);stroke:var(--surface);stroke-width:2}
+.trace .caption{font-size:12px;color:var(--ink-2);margin-top:4px}
+
+/* tooltip */
+.tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--bg);border-radius:6px;padding:8px 10px;font-size:12px;max-width:260px;box-shadow:0 6px 20px rgba(0,0,0,.25);display:none}
+.tip .th{font-family:var(--mono);font-weight:500;margin-bottom:4px}
+.tip .tr{display:flex;align-items:center;gap:6px;margin-top:3px}
+.tip .tr .sw{width:9px;height:9px;border-radius:2px;background:var(--tc);flex:none}
+.tip .tr .bar{height:6px;background:var(--tc);border-radius:2px}
+.tip .tr .n{font-family:var(--mono);width:44px;text-align:right;flex:none}
+.tip .tr .lab{width:54px;flex:none;opacity:.9}
+
+/* about */
+.about{columns:2;column-gap:32px;color:var(--ink-2)}
+.about h3{color:var(--ink);margin-bottom:6px;break-after:avoid}
+.about p,.about li{margin-bottom:8px;max-width:64ch}
+.about ol,.about ul{padding-left:18px;margin:0}
+.about section{break-inside:avoid;margin-bottom:14px}
+details summary{cursor:pointer;font-family:var(--serif);font-weight:600;font-size:17px}
+
+@media (max-width:1250px){
+  .grid{grid-template-columns:300px minmax(0,1fr)}
+  .grid .col.right{grid-column:1/-1;grid-template-columns:1fr 1fr}
+  .controls{grid-template-columns:1fr 1fr}
+  .controls .cgroup.inf{grid-column:1/-1}
+}
+@media (max-width:900px){
+  .grid,.grid .col.right{grid-template-columns:1fr}
+  .step{grid-template-columns:1fr}
+  .about{columns:1}
+  .controls{grid-template-columns:1fr}
+}
+@media (max-width:520px){
+  body{padding-inline:16px}
+  h1{font-size:24px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <div class="eyebrow">Probabilistic graphical models · approximate inference</div>
+    <h1>LDA Inference Workbench</h1>
+    <p class="sub">A tiny corpus, the plate model that generated it, and two inference algorithms you can step through one update at a time. <span class="cite">Notation follows Blei, Ng &amp; Jordan (2003): <i class="v">α</i> → <i class="v">θ<sub>d</sub></i> → <i class="v">z<sub>dn</sub></i> → <i class="v">w<sub>dn</sub></i> ← <i class="v">β<sub>k</sub></i> ← <i class="v">η</i>.</span></p>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="wrap">
+  <!-- ================= controls ================= -->
+  <div class="controls">
+    <div class="cgroup">
+      <div class="eyebrow">Corpus (synthetic, 3 hidden themes)</div>
+      <div class="crow">
+        <div class="ctl"><label for="cD">documents <i class="v">D</i> <span class="val" id="vD"></span></label><input type="range" id="cD" min="2" max="10" step="1"></div>
+        <div class="ctl"><label for="cN">words per doc <i class="v">N<sub>d</sub></i> <span class="val" id="vN"></span></label><input type="range" id="cN" min="3" max="14" step="1"></div>
+        <div class="ctl"><label for="cAG">generating <i class="v">α</i> <span class="val" id="vAG"></span></label><input type="range" id="cAG" min="-1.3" max="0.7" step="0.05"></div>
+        <div class="ctl" style="min-width:70px"><label for="cSeed">seed</label><input type="number" id="cSeed" min="1" max="9999" step="1"></div>
+        <button class="btn" id="bRegen" title="Draw a fresh corpus with the next seed">New corpus</button>
+      </div>
+    </div>
+    <div class="cgroup">
+      <div class="eyebrow">Model &amp; priors (used by inference)</div>
+      <div class="crow">
+        <div class="ctl"><label for="cK">topics <i class="v">K</i> <span class="val" id="vK"></span></label><input type="range" id="cK" min="2" max="5" step="1"></div>
+        <div class="ctl"><label for="cA">doc–topic prior <i class="v">α</i> <span class="val" id="vA"></span></label><input type="range" id="cA" min="-2" max="1" step="0.05"></div>
+        <div class="ctl"><label for="cE">topic–word prior <i class="v">η</i> <span class="val" id="vE"></span></label><input type="range" id="cE" min="-2" max="1" step="0.05"></div>
+      </div>
+      <p class="hint" style="font-size:11.5px;color:var(--muted)">Changing <i class="v">K</i> resets inference. <i class="v">α</i> and <i class="v">η</i> take effect at the next update, so you can turn them mid-run.</p>
+    </div>
+    <div class="cgroup inf">
+      <div class="eyebrow">Inference</div>
+      <div class="crow">
+        <div class="seg" role="group" aria-label="Algorithm">
+          <button id="algGibbs" aria-pressed="true">Collapsed Gibbs sampling</button>
+          <button id="algVI" aria-pressed="false">Mean-field variational inference</button>
+        </div>
+        <button class="btn" id="bReset">Reset to prior <kbd>0</kbd></button>
+        <button class="btn primary" id="bStep">Step <span id="stepName">token</span> <kbd>S</kbd></button>
+        <button class="btn" id="bDoc">Step document <kbd>D</kbd></button>
+        <button class="btn" id="bSweep"><span id="sweepName">Sweep</span> <kbd>W</kbd></button>
+        <button class="btn" id="bRun">Run <kbd>R</kbd></button>
+        <div class="ctl" style="min-width:120px"><label for="cSpeed">speed <span class="val" id="vSpeed"></span></label><input type="range" id="cSpeed" min="0" max="7" step="1"></div>
+        <label class="check" id="collectWrap"><input type="checkbox" id="cCollect"> collect samples (posterior mean)</label>
+        <label class="check"><input type="checkbox" id="cCompare"> compare with ground truth</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= main grid ================= -->
+  <div class="grid">
+    <div class="col left">
+      <div class="panel plate" id="platePanel">
+        <div class="ph"><h2>Plate notation</h2><span class="hint">hover a node</span></div>
+        <div id="plateModel"></div>
+        <div class="caption" id="plateCaption"></div>
+        <div id="plateQ"></div>
+      </div>
+      <div class="panel" id="priorPanel">
+        <div class="ph"><h2>What the prior believes</h2><button class="btn" id="bRedraw" style="padding:3px 8px;font-size:12px">Redraw</button></div>
+        <div class="eyebrow" style="margin-bottom:4px">six draws of <i class="v">θ<sub>d</sub></i> ~ Dir(<i class="v">α</i>)</div>
+        <div class="draws" id="priorTheta"></div>
+        <div class="eyebrow" style="margin:10px 0 4px">three draws of <i class="v">β<sub>k</sub></i> ~ Dir(<i class="v">η</i>) over the 12 words</div>
+        <div class="draws" id="priorBeta"></div>
+        <p class="hint" style="font-size:11.5px;color:var(--muted);margin-top:8px">Small <i class="v">α</i>: documents commit to one or two topics. Large <i class="v">α</i>: every document is an even mix. The same story holds for <i class="v">η</i> and words.</p>
+      </div>
+    </div>
+
+    <div class="col mid">
+      <div class="panel" id="docsPanel">
+        <div class="ph"><h2>Documents · <i class="v">w<sub>dn</sub></i> coloured by <i class="v">z<sub>dn</sub></i></h2><div class="legend" id="legend"></div></div>
+        <div class="docs" id="docs"></div>
+      </div>
+      <div class="panel" id="stepPanel">
+        <div class="ph"><h2 id="stepTitle">Current update</h2><span class="hint" id="stepHint"></span></div>
+        <div class="step" id="stepBody"></div>
+      </div>
+      <div class="panel trace" id="tracePanel">
+        <div class="ph"><h2 id="traceTitle">Trace</h2><span class="hint" id="traceHint"></span></div>
+        <div id="trace"></div>
+        <div class="caption" id="traceCaption"></div>
+      </div>
+    </div>
+
+    <div class="col right">
+      <div class="panel" id="thetaPanel">
+        <div class="ph"><h2>Topic mix per document · <i class="v">θ<sub>d</sub></i></h2><span class="hint" id="thetaHint"></span></div>
+        <div id="theta"></div>
+      </div>
+      <div class="panel beta" id="betaPanel">
+        <div class="ph"><h2>Words per topic · <i class="v">β<sub>k</sub></i></h2><span class="hint" id="betaHint"></span></div>
+        <div id="beta"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <details>
+      <summary>Reading guide &amp; experiments to try</summary>
+      <div class="about" style="margin-top:12px">
+        <section>
+          <h3>The generative story</h3>
+          <p>For each topic <i class="v">k</i>, draw a word distribution <i class="v">β<sub>k</sub></i> ~ Dir(<i class="v">η</i>). For each document <i class="v">d</i>, draw a topic mix <i class="v">θ<sub>d</sub></i> ~ Dir(<i class="v">α</i>); then for each position <i class="v">n</i>, draw a topic <i class="v">z<sub>dn</sub></i> ~ Cat(<i class="v">θ<sub>d</sub></i>) and a word <i class="v">w<sub>dn</sub></i> ~ Cat(<i class="v">β<sub>z<sub>dn</sub></sub></i>). Only the words are observed (shaded node). The corpus here really was generated this way from three hidden themes (river, code, bakery), so we can check inference against the truth, which is never possible with real text.</p>
+        </section>
+        <section>
+          <h3>Collapsed Gibbs sampling</h3>
+          <p><i class="v">θ</i> and <i class="v">β</i> are integrated out analytically (dashed nodes), leaving a Markov chain over the assignments <i class="v">z</i> alone. Each step removes one token from the count tables and redraws its topic from the full conditional. The first factor asks “which topics does this document already use?” (the rich get richer), the second asks “which topics like this word?”. The trace shows log <i class="v">p</i>(<i class="v">w</i>, <i class="v">z</i> | <i class="v">α</i>, <i class="v">η</i>); it fluctuates because the chain keeps sampling rather than optimising. Turn on <b>collect samples</b> after a burn-in to average the estimates across sweeps.</p>
+        </section>
+        <section>
+          <h3>Mean-field variational inference</h3>
+          <p>Replace the intractable posterior with a fully factored <i class="v">q</i>(<i class="v">θ</i>, <i class="v">z</i>, <i class="v">β</i>) = ∏ <i class="v">q</i>(<i class="v">θ<sub>d</sub></i> | <i class="v">γ<sub>d</sub></i>) ∏ <i class="v">q</i>(<i class="v">z<sub>dn</sub></i> | <i class="v">φ<sub>dn</sub></i>) ∏ <i class="v">q</i>(<i class="v">β<sub>k</sub></i> | <i class="v">λ<sub>k</sub></i>), whose graph has no edges at all, and do coordinate ascent on the evidence lower bound (ELBO). Each update is deterministic and never decreases the ELBO. Note that the mean-field family must be initialised asymmetrically, otherwise every topic stays identical forever.</p>
+        </section>
+        <section>
+          <h3>Experiments</h3>
+          <ol>
+            <li>Set <i class="v">α</i> = 0.05 and re-run: documents become nearly pure. Set <i class="v">α</i> = 5: every document looks like an even mix, and the topics have to blur to explain it.</li>
+            <li>Raise <i class="v">η</i> to 3. The prior now insists every topic put mass on every word; watch the word distributions flatten.</li>
+            <li>Reset twice with the same settings. The topics come back in a different order or colour: this is label switching, and it is why “compare with ground truth” has to match topics before scoring.</li>
+            <li>Set <i class="v">K</i> = 2 or 5 while the corpus has 3 themes. What does an unused or merged topic look like?</li>
+            <li>Compare the two traces. They are different quantities (a log joint vs a lower bound on log evidence), so never compare their heights, only their behaviour: Gibbs wanders, VI climbs and stalls.</li>
+            <li>Watch a single Gibbs step for a word like <span class="mono">loop</span> in a document that is mostly “river”: the document factor and the word factor pull in opposite directions.</li>
+          </ol>
+        </section>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s);
+const fmt=(x,d=3)=>Number.isFinite(x)?x.toFixed(d):'–';
+const sum=a=>a.reduce((s,v)=>s+v,0);
+
+/* ---------------- random & special functions ---------------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng=mulberry32(1);
+function randn(){const u=1-rng(),v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+function gammaSample(a){
+  if(a<1) return gammaSample(a+1)*Math.pow(rng(),1/a);
+  const d=a-1/3,c=1/Math.sqrt(9*d);
+  for(;;){let x,v;do{x=randn();v=1+c*x}while(v<=0);v=v*v*v;const u=rng();
+    if(u<1-0.0331*x*x*x*x)return d*v;if(Math.log(u)<0.5*x*x+d*(1-v+Math.log(v)))return d*v}
+}
+function dirichlet(av){const g=av.map(gammaSample);const s=sum(g);return g.map(x=>x/s)}
+function sampleCat(p){const u=rng();let c=0;for(let i=0;i<p.length;i++){c+=p[i];if(u<c)return{k:i,u}}return{k:p.length-1,u}}
+function lgamma(x){
+  const C=[0.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];
+  if(x<0.5)return Math.log(Math.PI/Math.sin(Math.PI*x))-lgamma(1-x);
+  x-=1;let a=C[0];const t=x+7.5;for(let i=1;i<9;i++)a+=C[i]/(x+i);
+  return 0.5*Math.log(2*Math.PI)+(x+0.5)*Math.log(t)-t+Math.log(a);
+}
+function digamma(x){let r=0;while(x<6){r-=1/x;x+=1}const f=1/(x*x);return r+Math.log(x)-0.5/x-f*(1/12-f*(1/120-f*(1/252-f*(1/240-f/132))))}
+
+/* ---------------- corpus ---------------- */
+const THEMES=[{name:'river',words:['water','fish','boat','river']},{name:'code',words:['code','bug','loop','data']},{name:'bakery',words:['bread','oven','flour','cake']}];
+const VOCAB=THEMES.flatMap(t=>t.words), V=VOCAB.length, J=THEMES.length;
+const TRUE_BETA=THEMES.map(t=>VOCAB.map(w=>{const i=t.words.indexOf(w);return i>=0?[0.30,0.25,0.18,0.11][i]:0.02}));
+const P={D:6,Nd:8,alphaGen:0.4,seed:1,K:3,alpha:0.5,eta:0.1};
+let corpus=null, algo='gibbs', G=null, VI=null;
+const ui={compare:false,collect:false,running:false,speedIdx:3,hoverNode:null};
+const SPEEDS=[1,2,5,10,25,50,100,'max'];
+
+function makeCorpus(){
+  rng=mulberry32(P.seed*7919+13);
+  const docs=[],trueZ=[],trueTheta=[],tokens=[];
+  for(let d=0;d<P.D;d++){
+    const th=dirichlet(Array(J).fill(P.alphaGen));trueTheta.push(th);
+    const ws=[],zs=[];
+    for(let n=0;n<P.Nd;n++){const z=sampleCat(th).k;const w=sampleCat(TRUE_BETA[z]).k;ws.push(w);zs.push(z);tokens.push({d,n})}
+    docs.push(ws);trueZ.push(zs);
+  }
+  corpus={docs,trueZ,trueTheta,tokens};
+}
+
+/* ---------------- collapsed Gibbs ---------------- */
+function gibbsInit(){
+  const K=P.K;rng=mulberry32(P.seed*104729+7+K);
+  const z=corpus.docs.map(doc=>{const th=dirichlet(Array(K).fill(P.alpha));return doc.map(()=>sampleCat(th).k)});
+  G={z,pos:0,sweep:0,trace:[],last:null,samples:null};
+  recount();G.trace.push({x:0,y:gibbsLogJoint()});
+}
+function recount(){
+  const K=P.K;G.ndk=corpus.docs.map(()=>Array(K).fill(0));G.nkw=Array.from({length:K},()=>Array(V).fill(0));G.nk=Array(K).fill(0);
+  corpus.docs.forEach((doc,d)=>doc.forEach((w,n)=>{const k=G.z[d][n];G.ndk[d][k]++;G.nkw[k][w]++;G.nk[k]++}));
+}
+function gibbsLogJoint(){
+  const K=P.K,a=P.alpha,e=P.eta;let L=0;
+  corpus.docs.forEach((doc,d)=>{L+=lgamma(K*a)-K*lgamma(a)-lgamma(doc.length+K*a);for(let k=0;k<K;k++)L+=lgamma(G.ndk[d][k]+a)});
+  for(let k=0;k<K;k++){L+=lgamma(V*e)-V*lgamma(e)-lgamma(G.nk[k]+V*e);for(let w=0;w<V;w++)L+=lgamma(G.nkw[k][w]+e)}
+  return L;
+}
+function gibbsStep(){
+  const K=P.K,T=corpus.tokens.length;const{d,n}=corpus.tokens[G.pos];const w=corpus.docs[d][n];const old=G.z[d][n];
+  G.ndk[d][old]--;G.nkw[old][w]--;G.nk[old]--;
+  const rows=[];let Z=0;
+  for(let k=0;k<K;k++){const a=G.ndk[d][k]+P.alpha;const b=(G.nkw[k][w]+P.eta)/(G.nk[k]+V*P.eta);const p=a*b;Z+=p;rows.push({k,a,b,p,nkw:G.nkw[k][w],nk:G.nk[k],ndk:G.ndk[d][k]})}
+  const probs=rows.map(r=>r.p/Z);const{k,u}=sampleCat(probs);
+  G.ndk[d][k]++;G.nkw[k][w]++;G.nk[k]++;G.z[d][n]=k;
+  G.last={d,n,w,old,k,u,rows,probs};
+  G.pos++;if(G.pos>=T){G.pos=0;G.sweep++;if(ui.collect)collectSample()}
+  pushTrace(G.trace,G.sweep+G.pos/T,gibbsLogJoint());
+}
+function collectSample(){
+  const K=P.K;if(!G.samples)G.samples={n:0,theta:corpus.docs.map(()=>Array(K).fill(0)),beta:Array.from({length:K},()=>Array(V).fill(0)),zc:corpus.docs.map(doc=>doc.map(()=>Array(K).fill(0)))};
+  const S=G.samples;S.n++;
+  corpus.docs.forEach((doc,d)=>{for(let k=0;k<K;k++)S.theta[d][k]+=(G.ndk[d][k]+P.alpha)/(doc.length+K*P.alpha);doc.forEach((w,n)=>S.zc[d][n][G.z[d][n]]++)});
+  for(let k=0;k<K;k++)for(let w=0;w<V;w++)S.beta[k][w]+=(G.nkw[k][w]+P.eta)/(G.nk[k]+V*P.eta);
+}
+function pushTrace(tr,x,y){tr.push({x,y});if(tr.length>6000){const keep=tr.filter((_,i)=>i%2===0||i===tr.length-1);tr.length=0;tr.push(...keep)}}
+function gibbsEstimates(){
+  const K=P.K,S=G.samples;
+  if(ui.collect&&S&&S.n>0){
+    return{theta:S.theta.map(r=>r.map(v=>v/S.n)),beta:S.beta.map(r=>r.map(v=>v/S.n)),
+      dist:S.zc.map(doc=>doc.map(c=>c.map(v=>v/S.n))),n:S.n};
+  }
+  return{theta:corpus.docs.map((doc,d)=>Array.from({length:K},(_,k)=>(G.ndk[d][k]+P.alpha)/(doc.length+K*P.alpha))),
+    beta:Array.from({length:K},(_,k)=>Array.from({length:V},(_,w)=>(G.nkw[k][w]+P.eta)/(G.nk[k]+V*P.eta))),
+    dist:G.z.map(doc=>doc.map(z=>Array.from({length:K},(_,k)=>k===z?1:0))),n:0};
+}
+
+/* ---------------- mean-field VI ---------------- */
+function viInit(){
+  const K=P.K;rng=mulberry32(P.seed*7919+101+K);
+  const phi=corpus.docs.map(doc=>doc.map(()=>dirichlet(Array(K).fill(1))));
+  VI={phi,gamma:null,lambda:null,d:0,n:0,phase:'phi',iter:0,trace:[],last:null};
+  VI.gamma=corpus.docs.map((doc,d)=>gammaUpdate(d).g);
+  VI.lambda=lambdaUpdate().l;
+  VI.trace.push({x:0,y:elbo()});
+}
+function gammaUpdate(d){const K=P.K;const sums=Array(K).fill(0);VI.phi[d].forEach(p=>p.forEach((v,k)=>sums[k]+=v));return{sums,g:sums.map(s=>P.alpha+s)}}
+function lambdaUpdate(){const K=P.K;const l=Array.from({length:K},()=>Array(V).fill(P.eta));corpus.docs.forEach((doc,d)=>doc.forEach((w,n)=>{const p=VI.phi[d][n];for(let k=0;k<K;k++)l[k][w]+=p[k]}));return{l}}
+function viProgress(){const T=corpus.tokens.length,D=P.D;let m;
+  if(VI.phase==='lambda')m=T+D;else{let before=0;for(let i=0;i<VI.d;i++)before+=corpus.docs[i].length;m=before+VI.n+VI.d}
+  return VI.iter+m/(T+D+1)}
+function viStep(){
+  const K=P.K;
+  if(VI.phase==='phi'){
+    const d=VI.d,n=VI.n,w=corpus.docs[d][n];const old=VI.phi[d][n].slice();
+    const sg=digamma(sum(VI.gamma[d]));const rows=[];let mx=-Infinity;
+    for(let k=0;k<K;k++){const et=digamma(VI.gamma[d][k])-sg;const eb=digamma(VI.lambda[k][w])-digamma(sum(VI.lambda[k]));const s=et+eb;rows.push({k,et,eb,s});if(s>mx)mx=s}
+    let Z=0;const ex=rows.map(r=>{const e=Math.exp(r.s-mx);Z+=e;return e});const nw=ex.map(e=>e/Z);
+    VI.phi[d][n]=nw;VI.last={type:'phi',d,n,w,old,rows,probs:nw};
+    VI.n++;if(VI.n>=corpus.docs[d].length)VI.phase='gamma';
+  }else if(VI.phase==='gamma'){
+    const d=VI.d;const old=VI.gamma[d].slice();const{sums,g}=gammaUpdate(d);VI.gamma[d]=g;
+    VI.last={type:'gamma',d,old,sums,gamma:g.slice()};
+    VI.d++;VI.n=0;VI.phase=VI.d>=P.D?'lambda':'phi';
+  }else{
+    const old=VI.lambda.map(r=>r.slice());VI.lambda=lambdaUpdate().l;
+    VI.last={type:'lambda',old,mass:VI.lambda.map(sum)};
+    VI.iter++;VI.d=0;VI.n=0;VI.phase='phi';
+  }
+  pushTrace(VI.trace,viProgress(),elbo());
+}
+function elbo(){
+  const K=P.K,a=P.alpha,e=P.eta;let L=0;
+  const ElogB=VI.lambda.map(row=>{const s=digamma(sum(row));return row.map(v=>digamma(v)-s)});
+  corpus.docs.forEach((doc,d)=>{
+    const g=VI.gamma[d],sg=sum(g),dsg=digamma(sg);const Elt=g.map(v=>digamma(v)-dsg);
+    L+=lgamma(K*a)-K*lgamma(a)-lgamma(sg);
+    for(let k=0;k<K;k++)L+=(a-1)*Elt[k]+lgamma(g[k])-(g[k]-1)*Elt[k];
+    doc.forEach((w,n)=>{const p=VI.phi[d][n];for(let k=0;k<K;k++)if(p[k]>1e-12)L+=p[k]*(Elt[k]+ElogB[k][w]-Math.log(p[k]))});
+  });
+  for(let k=0;k<K;k++){const row=VI.lambda[k],sl=sum(row);L+=lgamma(V*e)-V*lgamma(e)-lgamma(sl);
+    for(let w=0;w<V;w++)L+=(e-1)*ElogB[k][w]+lgamma(row[w])-(row[w]-1)*ElogB[k][w]}
+  return L;
+}
+function viEstimates(){
+  return{theta:VI.gamma.map(g=>{const s=sum(g);return g.map(v=>v/s)}),beta:VI.lambda.map(l=>{const s=sum(l);return l.map(v=>v/s)}),dist:VI.phi,n:0};
+}
+
+/* ---------------- stepping helpers ---------------- */
+function stepOne(){algo==='gibbs'?gibbsStep():viStep()}
+function stepDoc(){
+  if(algo==='gibbs'){const d0=corpus.tokens[G.pos].d;do{gibbsStep()}while(G.pos!==0&&corpus.tokens[G.pos].d===d0)}
+  else{if(VI.phase==='lambda'){viStep();return}do{viStep()}while(VI.last.type!=='gamma')}
+}
+function stepSweep(){
+  if(algo==='gibbs'){do{gibbsStep()}while(G.pos!==0)}
+  else{do{viStep()}while(VI.last.type!=='lambda')}
+}
+function resetInference(){gibbsInit();viInit();renderAll()}
+
+/* ---------------- alignment & colours ---------------- */
+function alignTopics(beta){
+  const K=beta.length,map=Array(K).fill(-1),used=new Set(),pairs=[];
+  for(let k=0;k<K;k++)for(let j=0;j<J;j++){let s=0;for(let w=0;w<V;w++)s+=Math.abs(beta[k][w]-TRUE_BETA[j][w]);pairs.push({k,j,s})}
+  pairs.sort((a,b)=>a.s-b.s);
+  for(const p of pairs){if(map[p.k]<0&&!used.has(p.j)){map[p.k]=p.j;used.add(p.j)}}
+  return map;
+}
+function colorSlots(map){if(!ui.compare)return map.map((_,k)=>k);let next=J;return map.map(j=>j>=0?j:next++)}
+const tc=slot=>`var(--t${slot+1})`;
+
+/* ---------------- current-focus helpers ---------------- */
+function focus(){ // what is highlighted right now
+  if(algo==='gibbs'){if(!G.last)return{};return{d:G.last.d,n:G.last.n,w:G.last.w,docOnly:false}}
+  const L=VI.last;if(!L)return{};
+  if(L.type==='phi')return{d:L.d,n:L.n,w:L.w};
+  if(L.type==='gamma')return{d:L.d,docOnly:true};
+  return{all:true};
+}
+
+/* ---------------- rendering ---------------- */
+let est=null,map=null,slots=null;
+function renderAll(){
+  est=algo==='gibbs'?gibbsEstimates():viEstimates();
+  map=alignTopics(est.beta);slots=colorSlots(map);
+  renderStats();renderLegend();renderDocs();renderTheta();renderBeta();renderPlate();renderStep();renderTrace();
+}
+function topicName(k){return`Topic ${k+1}`+(ui.compare&&map[k]>=0?` ≈ ${THEMES[map[k]].name}`:'')}
+
+function renderStats(){
+  const f=focus();let acc='';
+  if(ui.compare){let ok=0,tot=0;corpus.docs.forEach((doc,d)=>doc.forEach((w,n)=>{const k=argmax(est.dist[d][n]);if(map[k]>=0){tot++;if(map[k]===corpus.trueZ[d][n])ok++}}));acc=`<span>token accuracy <b>${tot?Math.round(100*ok/tot):0}%</b></span>`}
+  const T=corpus.tokens.length;
+  if(algo==='gibbs'){
+    $('#stats').innerHTML=`<span>${T} tokens · ${V} words</span><span>sweeps <b>${G.sweep}</b> + ${G.pos}/${T}</span><span>log p(w, z) <b>${fmt(G.trace[G.trace.length-1].y,1)}</b></span>${ui.collect?`<span>samples <b>${G.samples?G.samples.n:0}</b></span>`:''}${acc}`;
+  }else{
+    $('#stats').innerHTML=`<span>${T} tokens · ${V} words</span><span>iterations <b>${VI.iter}</b> · ${VI.phase==='lambda'?'λ update':`doc ${VI.d+1}, ${VI.phase==='phi'?'φ':'γ'}`}</span><span>ELBO <b>${fmt(VI.trace[VI.trace.length-1].y,1)}</b></span>${acc}`;
+  }
+}
+function argmax(a){let m=0;for(let i=1;i<a.length;i++)if(a[i]>a[m])m=i;return m}
+
+function renderLegend(){
+  const K=P.K;let h=Array.from({length:K},(_,k)=>`<span><i class="sw" style="--tc:${tc(slots[k])}"></i>${topicName(k)}</span>`).join('');
+  if(ui.compare)h+=`<span style="color:var(--muted)">· true theme dot:</span>`+THEMES.map((t,j)=>`<span><i class="dot" style="--tc:${tc(j)}"></i>${t.name}</span>`).join('');
+  $('#legend').innerHTML=h;
+}
+
+function renderDocs(){
+  const f=focus();
+  $('#docs').innerHTML=corpus.docs.map((doc,d)=>{
+    const cur=f.d===d;
+    const chips=doc.map((w,n)=>{
+      const p=est.dist[d][n],k=argmax(p),conf=p[k];
+      const isCur=f.d===d&&f.n===n&&!f.docOnly;
+      const changed=algo==='gibbs'&&isCur&&G.last.old!==G.last.k;
+      const tint=Math.round(14+conf*36);
+      return`<span class="chip${isCur?' cur':''}${changed?' changed':''}" data-d="${d}" data-n="${n}" style="--tc:${tc(slots[k])};--tint:${tint}%">${VOCAB[w]}${ui.compare?`<i class="truth" style="background:${tc(corpus.trueZ[d][n])}"></i>`:''}</span>`;
+    }).join('');
+    return`<div class="doc${cur?' cur':''}"><div class="doc-h"><span class="eyebrow">Document ${d+1}</span><span class="mono" style="font-size:10.5px;color:var(--muted)">N=${doc.length}</span></div><div class="chips">${chips}</div></div>`;
+  }).join('');
+}
+
+function stackedBar(vals,slotOf,titles){
+  return`<div class="sbar">${vals.map((v,k)=>v>0.002?`<span style="width:${(v*100).toFixed(2)}%;background:${tc(slotOf(k))}" title="${titles(k,v)}"></span>`:'').join('')}</div>`;
+}
+function renderTheta(){
+  const f=focus();
+  $('#thetaHint').textContent=algo==='gibbs'?(ui.collect&&est.n?`mean of ${est.n} samples`:'(n_dk + α) / (N_d + Kα)'):'γ_d normalised';
+  $('#theta').innerHTML=corpus.docs.map((doc,d)=>{
+    let h=`<div class="trow${f.d===d?' cur':''}"><span class="tlab">d${d+1}</span>${stackedBar(est.theta[d],k=>slots[k],(k,v)=>`${topicName(k)}: ${(v*100).toFixed(1)}%`)}</div>`;
+    if(ui.compare)h+=`<div class="trow true"><span class="tlab">true</span>${stackedBar(corpus.trueTheta[d],j=>j,(j,v)=>`${THEMES[j].name}: ${(v*100).toFixed(1)}%`)}</div>`;
+    return h;
+  }).join('');
+}
+function renderBeta(){
+  const K=P.K,f=focus();
+  $('#betaHint').textContent=algo==='gibbs'?(ui.collect&&est.n?`mean of ${est.n} samples`:'(n_kw + η) / (n_k + Vη)'):'λ_k normalised';
+  const mx=Math.max(...est.beta.flat(),...(ui.compare?TRUE_BETA.flat():[0]));
+  let h=`<table><thead><tr><th></th>${Array.from({length:K},(_,k)=>`<th><i class="sw" style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${tc(slots[k])};margin-right:4px"></i>${k+1}${ui.compare&&map[k]>=0?`<span style="color:var(--muted)"> ≈${THEMES[map[k]].name}</span>`:''}</th>`).join('')}</tr></thead><tbody>`;
+  VOCAB.forEach((word,w)=>{
+    const theme=Math.floor(w/4);
+    if(w%4===0)h+=`<tr class="theme"><td colspan="${K+1}" style="padding-top:${w?6:2}px">${THEMES[theme].name} words</td></tr>`;
+    h+=`<tr class="${f.w===w?'cur':''}"><td class="w">${word}</td>${Array.from({length:K},(_,k)=>{
+      const v=est.beta[k][w];const j=map[k];
+      return`<td><div class="cell${f.w===w?' hlw':''}" title="${topicName(k)} · ${word}: ${fmt(v)}"><div class="bar" style="width:${(v/mx*100).toFixed(1)}%;--tc:${tc(slots[k])}"></div>${ui.compare&&j>=0?`<div class="tick" style="left:${(TRUE_BETA[j][w]/mx*100).toFixed(1)}%" title="true ${THEMES[j].name}: ${fmt(TRUE_BETA[j][w])}"></div>`:''}</div></td>`}).join('')}</tr>`;
+  });
+  h+=`</tbody></table>`;
+  if(ui.compare)h+=`<p style="font-size:11px;color:var(--muted);margin-top:6px">Black ticks mark the true word probabilities of the matched theme.</p>`;
+  $('#beta').innerHTML=h;
+}
+
+/* ---- plate diagrams ---- */
+function plateSVG(){
+  return`<svg viewBox="0 0 460 190" role="img" aria-label="LDA plate diagram">
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-2)"/></marker></defs>
+  <rect class="pl" x="80" y="45" width="222" height="112" rx="6"/><text class="pll" x="294" y="150" text-anchor="end">D</text>
+  <rect class="pl" x="165" y="58" width="130" height="86" rx="6"/><text class="pll" x="288" y="138" text-anchor="end">N<tspan font-size="8" dy="2">d</tspan></text>
+  <rect class="pl" x="342" y="68" width="60" height="66" rx="6"/><text class="pll" x="396" y="128" text-anchor="end">K</text>
+  <line class="edge" x1="46" y1="100" x2="90" y2="100"/>
+  <line class="edge" x1="128" y1="100" x2="174" y2="100"/>
+  <line class="edge" x1="212" y1="100" x2="245" y2="100"/>
+  <line class="edge" x1="355" y1="100" x2="284" y2="100"/>
+  <line class="edge" x1="372" y1="42" x2="372" y2="80"/>
+  <g class="hyper" data-node="alpha"><text x="34" y="100">α</text></g>
+  <g class="hyper" data-node="eta"><text x="372" y="26">η</text></g>
+  <g class="node" data-node="theta" id="nTheta"><circle cx="110" cy="100" r="17"/><text x="110" y="100">θ<tspan class="sub" dy="5">d</tspan></text></g>
+  <g class="node" data-node="z" id="nZ"><circle cx="195" cy="100" r="17"/><text x="195" y="100">z<tspan class="sub" dy="5">dn</tspan></text></g>
+  <g class="node obs" data-node="w" id="nW"><circle cx="265" cy="100" r="17"/><text x="265" y="100">w<tspan class="sub" dy="5">dn</tspan></text></g>
+  <g class="node" data-node="beta" id="nBeta"><circle cx="372" cy="100" r="17"/><text x="372" y="100">β<tspan class="sub" dy="5">k</tspan></text></g>
+  </svg>`;
+}
+function qSVG(){
+  return`<div class="qtitle"><div class="eyebrow">Variational family <i class="v">q</i>(<i class="v">θ</i>, <i class="v">z</i>, <i class="v">β</i>)</div></div>
+  <svg viewBox="0 0 460 150" role="img" aria-label="Mean-field variational family">
+  <rect class="pl" x="40" y="30" width="270" height="105" rx="6"/><text class="pll" x="302" y="128" text-anchor="end">D</text>
+  <rect class="pl" x="185" y="40" width="112" height="86" rx="6"/><text class="pll" x="290" y="118" text-anchor="end">N<tspan font-size="8" dy="2">d</tspan></text>
+  <rect class="pl" x="342" y="30" width="60" height="105" rx="6"/><text class="pll" x="396" y="128" text-anchor="end">K</text>
+  <line class="edge" x1="110" y1="46" x2="110" y2="70"/>
+  <line class="edge" x1="240" y1="56" x2="240" y2="80"/>
+  <line class="edge" x1="372" y1="46" x2="372" y2="70"/>
+  <g class="hyper" data-node="gamma"><text x="110" y="32">γ<tspan font-size="9" dy="4">d</tspan></text></g>
+  <g class="hyper" data-node="phi"><text x="240" y="42">φ<tspan font-size="9" dy="4">dn</tspan></text></g>
+  <g class="hyper" data-node="lambda"><text x="372" y="32">λ<tspan font-size="9" dy="4">k</tspan></text></g>
+  <g class="node" data-node="theta" id="qTheta"><circle cx="110" cy="90" r="17"/><text x="110" y="90">θ<tspan class="sub" dy="5">d</tspan></text></g>
+  <g class="node" data-node="z" id="qZ"><circle cx="240" cy="100" r="17"/><text x="240" y="100">z<tspan class="sub" dy="5">dn</tspan></text></g>
+  <g class="node" data-node="beta" id="qBeta"><circle cx="372" cy="90" r="17"/><text x="372" y="90">β<tspan class="sub" dy="5">k</tspan></text></g>
+  </svg>
+  <div class="caption">No edges between θ, z and β: every posterior dependency has been cut and replaced by its own free parameter (γ, φ, λ).</div>`;
+}
+function renderPlate(){
+  if(!$('#plateModel').firstChild){$('#plateModel').innerHTML=plateSVG();bindPlateHover($('#plateModel'))}
+  const showQ=algo==='vi';
+  if(showQ&&!$('#plateQ').firstChild){$('#plateQ').innerHTML=qSVG();bindPlateHover($('#plateQ'))}
+  if(!showQ)$('#plateQ').innerHTML='';
+  const f=focus();
+  const set=(id,on)=>{const e=$(id);if(e)e.classList.toggle('hl',!!on)};
+  const col=(id,on)=>{const e=$(id);if(e)e.classList.toggle('collapsed',!!on)};
+  col('#nTheta',algo==='gibbs');col('#nBeta',algo==='gibbs');
+  if(algo==='gibbs'){set('#nZ',f.n!==undefined);set('#nW',f.n!==undefined);set('#nTheta',false);set('#nBeta',false);
+    $('#plateCaption').innerHTML=`Dashed nodes are integrated out: collapsed Gibbs only ever samples <i class="v">z</i>. The counts <i class="v">n<sub>dk</sub></i> and <i class="v">n<sub>kw</sub></i> stand in for <i class="v">θ</i> and <i class="v">β</i>.`;
+  }else{
+    const t=VI.last?VI.last.type:null;
+    set('#nZ',false);set('#nW',false);set('#nTheta',false);set('#nBeta',false);
+    set('#qZ',t==='phi');set('#qTheta',t==='gamma');set('#qBeta',t==='lambda');
+    $('#plateCaption').innerHTML=`The model is unchanged; inference instead fits the factored <i class="v">q</i> below to it by maximising the ELBO.`;
+  }
+}
+const NODE_PANEL={theta:'#thetaPanel',z:'#docsPanel',w:'#docsPanel',beta:'#betaPanel',gamma:'#thetaPanel',phi:'#docsPanel',lambda:'#betaPanel',alpha:'#priorPanel',eta:'#priorPanel'};
+const NODE_TEXT={alpha:'α: Dirichlet concentration on document–topic mixes. See the prior panel.',eta:'η: Dirichlet concentration on topic–word distributions.',theta:'θ_d: the topic mix of document d, a point on the K-simplex.',z:'z_dn: the topic that generated the n-th word of document d. Latent, one per token.',w:'w_dn: the observed word. Shaded because it is data.',beta:'β_k: the word distribution of topic k, a point on the V-simplex.',gamma:'γ_d: Dirichlet parameters of q(θ_d). Normalised, they estimate θ_d.',phi:'φ_dn: the K responsibilities q(z_dn = k) of one token.',lambda:'λ_k: Dirichlet parameters of q(β_k). Normalised, they estimate β_k.'};
+function bindPlateHover(root){
+  root.querySelectorAll('[data-node]').forEach(el=>{
+    el.addEventListener('mouseenter',e=>{const p=$(NODE_PANEL[el.dataset.node]);if(p)p.classList.add('glow');showTip(e,`<div class="th">${NODE_TEXT[el.dataset.node]}</div>`)});
+    el.addEventListener('mousemove',moveTip);
+    el.addEventListener('mouseleave',()=>{const p=$(NODE_PANEL[el.dataset.node]);if(p)p.classList.remove('glow');hideTip()});
+  });
+}
+
+/* ---- current update panel ---- */
+function vbars(probs,pick,ghost){
+  const K=probs.length,mx=Math.max(...probs,...(ghost||[0]),1e-9);
+  return`<div class="vbars">${probs.map((p,k)=>`<div class="vb${pick===k?' pick':''}"><span class="val">${fmt(p,2)}</span><div class="bar" style="height:${(p/mx*100).toFixed(1)}%;--tc:${tc(slots[k])}"></div>${ghost?`<div class="ghost" style="height:${(ghost[k]/mx*100).toFixed(1)}%"></div>`:''}</div>`).join('')}</div><div class="vlabs">${probs.map((_,k)=>`<span>${k+1}</span>`).join('')}</div>`;
+}
+function renderStep(){
+  const body=$('#stepBody');
+  if(algo==='gibbs'){
+    $('#stepTitle').innerHTML='Current update · one Gibbs step';
+    const L=G.last;
+    if(!L){$('#stepHint').textContent='';body.innerHTML=`<div class="prose"><p class="empty">Nothing sampled yet. The assignments shown were drawn from the prior: θ_d ~ Dir(α), z_dn ~ Cat(θ_d). Press <b>Step token</b>.</p></div>`;return}
+    const word=VOCAB[L.w];const{d,n}=L;
+    $('#stepHint').textContent=`token ${n+1} of document ${d+1}`;
+    const rows=L.rows.map((r,k)=>`<tr class="${L.k===k?'pick':''}"><td><i class="sw" style="--tc:${tc(slots[k])}"></i>${k+1}</td><td>${r.ndk}+${P.alpha}</td><td>(${r.nkw}+${P.eta})/(${r.nk}+${(V*P.eta).toFixed(2)})</td><td>${fmt(r.p,3)}</td><td>${fmt(L.probs[k],3)}</td></tr>`).join('');
+    let cdf=0;const cdfBar=`<div class="cdf"><div class="sbar">${L.probs.map((p,k)=>`<span style="width:${(p*100).toFixed(2)}%;background:${tc(slots[k])}"></span>`).join('')}</div><div class="u" style="left:${(L.u*100).toFixed(2)}%"></div><div class="cap">inverse-CDF draw: u = ${fmt(L.u,3)} lands in topic ${L.k+1}</div></div>`;
+    body.innerHTML=`<div class="prose">
+      <p>Resampling <b>z</b> for the word <b class="mono">${word}</b> (token ${n+1}, document ${d+1}). Its old topic was <b>${L.old+1}</b>. First remove it from the counts, then draw a new topic from the full conditional:</p>
+      <div class="formula"><i>p</i>(<i>z<sub>dn</sub></i>=<i>k</i> | <i>z</i><sub>−dn</sub>, <i>w</i>) ∝ (<i>n<sub>dk</sub></i> + <i>α</i>) · <span class="frac"><span><i>n<sub>kw</sub></i> + <i>η</i></span><span><i>n<sub>k</sub></i> + <i>Vη</i></span></span></div>
+      <p><b>Result: topic ${L.k+1}</b>${L.old!==L.k?` (changed from ${L.old+1})`:' (unchanged)'}. The first factor is “how much does document ${d+1} already use topic k?”, the second is “how much does topic k like the word <span class="mono">${word}</span>?”.</p>
+    </div>
+    <div><table class="tbl"><thead><tr><th>topic</th><th>n<sub>dk</sub>+α</th><th>(n<sub>kw</sub>+η)/(n<sub>k</sub>+Vη)</th><th>product</th><th>p</th></tr></thead><tbody>${rows}</tbody></table>
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">Counts exclude the token being resampled.</p></div>
+    <div class="dist">${vbars(L.probs,L.k)}${cdfBar}</div>`;
+    return;
+  }
+  // VI
+  $('#stepTitle').innerHTML='Current update · one coordinate-ascent step';
+  const L=VI.last;
+  if(!L){$('#stepHint').textContent='';body.innerHTML=`<div class="prose"><p class="empty">Initialised: φ_dn drawn at random (to break symmetry), then γ and λ set to their optimal values given φ. Press <b>Step update</b>.</p></div>`;return}
+  if(L.type==='phi'){
+    const word=VOCAB[L.w],{d,n}=L;$('#stepHint').textContent=`φ update · token ${n+1} of document ${d+1}`;
+    const pick=argmax(L.probs);
+    const rows=L.rows.map((r,k)=>`<tr class="${pick===k?'pick':''}"><td><i class="sw" style="--tc:${tc(slots[k])}"></i>${k+1}</td><td>${fmt(r.et,2)}</td><td>${fmt(r.eb,2)}</td><td>${fmt(r.s,2)}</td><td>${fmt(L.old[k],2)} → ${fmt(L.probs[k],2)}</td></tr>`).join('');
+    body.innerHTML=`<div class="prose">
+      <p>Updating the responsibilities <b>φ<sub>dn</sub></b> for the word <b class="mono">${word}</b> (token ${n+1}, document ${d+1}), holding γ and λ fixed:</p>
+      <div class="formula"><i>φ<sub>dnk</sub></i> ∝ exp( 𝔼<sub>q</sub>[log <i>θ<sub>dk</sub></i>] + 𝔼<sub>q</sub>[log <i>β<sub>kw</sub></i>] )<br><span style="font-size:.85em;color:var(--ink-2)">with 𝔼[log <i>θ<sub>dk</sub></i>] = ψ(<i>γ<sub>dk</sub></i>) − ψ(Σ<sub>k'</sub><i>γ<sub>dk'</sub></i>), likewise for λ</span></div>
+      <p>Same two forces as Gibbs, in expectation under <i class="v">q</i>: ψ is the digamma function, so these are expected log-probabilities, not log-expected. Dashed outlines show the previous φ.</p>
+    </div>
+    <div><table class="tbl"><thead><tr><th>topic</th><th>𝔼 log θ<sub>dk</sub></th><th>𝔼 log β<sub>kw</sub></th><th>sum</th><th>φ old → new</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="dist">${vbars(L.probs,pick,L.old)}</div>`;
+  }else if(L.type==='gamma'){
+    const d=L.d;$('#stepHint').textContent=`γ update · document ${d+1}`;
+    const rows=L.gamma.map((g,k)=>`<tr><td><i class="sw" style="--tc:${tc(slots[k])}"></i>${k+1}</td><td>${P.alpha}</td><td>${fmt(L.sums[k],2)}</td><td>${fmt(L.old[k],2)} → ${fmt(g,2)}</td></tr>`).join('');
+    const s=sum(L.gamma);
+    body.innerHTML=`<div class="prose">
+      <p>Updating <b>γ<sub>d</sub></b>, the Dirichlet parameters of <i class="v">q</i>(θ<sub>${d+1}</sub>), from the responsibilities of all ${corpus.docs[d].length} tokens in document ${d+1}:</p>
+      <div class="formula"><i>γ<sub>dk</sub></i> = <i>α</i> + Σ<sub>n</sub> <i>φ<sub>dnk</sub></i></div>
+      <p>The prior contributes α pseudo-counts; each token contributes its soft assignment. Normalised, γ<sub>d</sub> is the estimate of θ<sub>d</sub> shown on the right.</p>
+    </div>
+    <div><table class="tbl"><thead><tr><th>topic</th><th>α</th><th>Σ<sub>n</sub> φ<sub>dnk</sub></th><th>γ old → new</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="dist">${vbars(L.gamma.map(g=>g/s),-1,L.old.map(g=>g/sum(L.old)))}<p style="font-size:11px;color:var(--muted)">γ<sub>d</sub> normalised (dashed: before)</p></div>`;
+  }else{
+    $('#stepHint').textContent='λ update · all topics';
+    const rows=L.mass.map((m,k)=>`<tr><td><i class="sw" style="--tc:${tc(slots[k])}"></i>${k+1}</td><td>${fmt(sum(L.old[k]),2)} → ${fmt(m,2)}</td><td>${fmt(m-V*P.eta,2)}</td></tr>`).join('');
+    body.innerHTML=`<div class="prose">
+      <p>Updating <b>λ<sub>k</sub></b> for every topic at once, from the responsibilities of every token in the corpus:</p>
+      <div class="formula"><i>λ<sub>kw</sub></i> = <i>η</i> + Σ<sub>d</sub> Σ<sub>n</sub> <i>φ<sub>dnk</sub></i> · 𝟙[<i>w<sub>dn</sub></i> = <i>w</i>]</div>
+      <p>This is the soft version of the Gibbs count table <i class="v">n<sub>kw</sub></i>. Iteration ${VI.iter} is complete; the word distributions on the right have just changed.</p>
+    </div>
+    <div><table class="tbl"><thead><tr><th>topic</th><th>Σ<sub>w</sub> λ<sub>kw</sub> old → new</th><th>expected tokens</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="prose"><p style="font-size:12px">The “expected tokens” column is how many of the ${corpus.tokens.length} tokens each topic currently claims under <i class="v">q</i>. A topic near zero is dying out.</p></div>`;
+  }
+}
+
+/* ---- trace ---- */
+function renderTrace(){
+  const tr=algo==='gibbs'?G.trace:VI.trace;
+  $('#traceTitle').innerHTML=algo==='gibbs'?'Trace · log <i class="v">p</i>(<i class="v">w</i>, <i class="v">z</i> | <i class="v">α</i>, <i class="v">η</i>)':'Trace · ELBO';
+  $('#traceHint').textContent=algo==='gibbs'?'x = sweeps':'x = iterations';
+  $('#traceCaption').textContent=algo==='gibbs'?'A sampler does not climb: after burn-in it should wander around a plateau. Sudden jumps are tokens flipping between topics.':'Coordinate ascent never decreases the ELBO. Flat stretches mean the local optimum is reached; a different seed may find a better one.';
+  const W=620,H=170,ml=52,mr=14,mt=10,mb=24;
+  const pts=tr.length>700?tr.filter((_,i)=>i%Math.ceil(tr.length/700)===0||i===tr.length-1):tr;
+  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  const x0=0,x1=Math.max(1,...xs);let y0=Math.min(...ys),y1=Math.max(...ys);if(y1-y0<1){y0-=1;y1+=1}
+  const pad=(y1-y0)*0.08;y0-=pad;y1+=pad;
+  const X=x=>ml+(x-x0)/(x1-x0)*(W-ml-mr),Y=y=>mt+(y1-y)/(y1-y0)*(H-mt-mb);
+  const yt=niceTicks(y0,y1,4),xt=niceTicks(x0,x1,6);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Trace of the objective over iterations">`;
+  yt.ticks.forEach(t=>{s+=`<line class="gl" x1="${ml}" x2="${W-mr}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}"/><text x="${ml-6}" y="${(Y(t)+3).toFixed(1)}" text-anchor="end">${t.toFixed(yt.dec)}</text>`});
+  xt.ticks.forEach(t=>{s+=`<text x="${X(t).toFixed(1)}" y="${H-8}" text-anchor="middle">${t.toFixed(xt.dec)}</text>`});
+  s+=`<line class="ax" x1="${ml}" x2="${W-mr}" y1="${H-mb}" y2="${H-mb}"/>`;
+  const path=pts.map((p,i)=>`${i?'L':'M'}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join('');
+  s+=`<path class="ar" d="${path}L${X(pts[pts.length-1].x).toFixed(1)},${H-mb}L${X(pts[0].x).toFixed(1)},${H-mb}Z"/><path class="ln" d="${path}"/>`;
+  const e=pts[pts.length-1];s+=`<circle class="end" cx="${X(e.x).toFixed(1)}" cy="${Y(e.y).toFixed(1)}" r="4"/>`;
+  s+=`</svg>`;
+  $('#trace').innerHTML=s;
+}
+function niceTicks(a,b,n){const r=b-a;if(r<=0)return{ticks:[a],dec:0};const raw=r/n;const p=Math.pow(10,Math.floor(Math.log10(raw)));const m=raw/p;const step=(m<1.5?1:m<3?2:m<7?5:10)*p;const t=[];for(let v=Math.ceil(a/step)*step;v<=b+1e-9;v+=step)t.push(v);return{ticks:t,dec:Math.max(0,-Math.floor(Math.log10(step)))}}
+
+/* ---- prior draws ---- */
+let priorSeed=5;
+function renderPrior(){
+  const K=P.K;const saved=rng;rng=mulberry32(priorSeed*911+K);
+  $('#priorTheta').innerHTML=Array.from({length:6},(_,i)=>`<div class="drow"><span class="dl">θ<sup>(${i+1})</sup></span>${stackedBar(dirichlet(Array(K).fill(P.alpha)),k=>slots?slots[k]:k,(k,v)=>`topic ${k+1}: ${(v*100).toFixed(0)}%`)}</div>`).join('');
+  $('#priorBeta').innerHTML=Array.from({length:3},(_,i)=>{const b=dirichlet(Array(V).fill(P.eta));const mx=Math.max(...b);return`<div class="drow"><span class="dl">β<sup>(${i+1})</sup></span><div class="bbar">${b.map((v,w)=>`<span style="height:${(v/mx*100).toFixed(0)}%;--tc:var(--line-2)" title="${VOCAB[w]}: ${fmt(v,2)}"></span>`).join('')}</div></div>`}).join('');
+  rng=saved;
+}
+
+/* ---- tooltip ---- */
+const tip=$('#tip');
+function showTip(e,html){tip.innerHTML=html;tip.style.display='block';moveTip(e)}
+function moveTip(e){const x=Math.min(e.clientX+14,window.innerWidth-tip.offsetWidth-8),y=Math.min(e.clientY+14,window.innerHeight-tip.offsetHeight-8);tip.style.left=x+'px';tip.style.top=y+'px'}
+function hideTip(){tip.style.display='none'}
+$('#docs').addEventListener('mouseover',e=>{
+  const c=e.target.closest('.chip');if(!c)return;
+  const d=+c.dataset.d,n=+c.dataset.n,w=corpus.docs[d][n],p=est.dist[d][n];
+  const head=algo==='gibbs'?(ui.collect&&est.n?`fraction of ${est.n} samples`:'current sample z<sub>dn</sub>'):'φ<sub>dn</sub> = q(z<sub>dn</sub>)';
+  let h=`<div class="th">${VOCAB[w]} · doc ${d+1}, token ${n+1}</div><div style="opacity:.8;margin-bottom:2px">${head}</div>`;
+  h+=p.map((v,k)=>`<div class="tr"><span class="sw" style="--tc:${tc(slots[k])}"></span><span class="lab">topic ${k+1}</span><span class="bar" style="width:${(v*90).toFixed(0)}px;--tc:${tc(slots[k])}"></span><span class="n">${fmt(v,2)}</span></div>`).join('');
+  if(ui.compare)h+=`<div style="margin-top:5px;opacity:.85">true theme: <b>${THEMES[corpus.trueZ[d][n]].name}</b></div>`;
+  showTip(e,h);
+});
+$('#docs').addEventListener('mousemove',e=>{if(tip.style.display==='block')moveTip(e)});
+$('#docs').addEventListener('mouseout',e=>{if(e.target.closest('.chip'))hideTip()});
+
+/* ---------------- controls ---------------- */
+const logSlider=(id,vid,get,set,dec)=>{const el=$(id);el.value=Math.log10(get());$(vid).textContent=get().toFixed(dec);el.addEventListener('input',()=>{set(+Math.pow(10,+el.value).toPrecision(2));$(vid).textContent=get().toFixed(dec)})};
+const intSlider=(id,vid,get,set)=>{const el=$(id);el.value=get();$(vid).textContent=get();el.addEventListener('input',()=>{set(+el.value);$(vid).textContent=get()})};
+function newCorpusAndReset(){stopRun();makeCorpus();resetInference()}
+intSlider('#cD','#vD',()=>P.D,v=>{P.D=v;newCorpusAndReset()});
+intSlider('#cN','#vN',()=>P.Nd,v=>{P.Nd=v;newCorpusAndReset()});
+logSlider('#cAG','#vAG',()=>P.alphaGen,v=>{P.alphaGen=v;newCorpusAndReset()},2);
+$('#cSeed').value=P.seed;$('#cSeed').addEventListener('change',()=>{P.seed=Math.max(1,+$('#cSeed').value|0);$('#cSeed').value=P.seed;newCorpusAndReset()});
+$('#bRegen').addEventListener('click',()=>{P.seed++;$('#cSeed').value=P.seed;newCorpusAndReset()});
+intSlider('#cK','#vK',()=>P.K,v=>{P.K=v;stopRun();resetInference();renderPrior()});
+logSlider('#cA','#vA',()=>P.alpha,v=>{P.alpha=v;if(G.samples)G.samples=null;if(algo==='gibbs')pushTrace(G.trace,G.sweep+G.pos/corpus.tokens.length,gibbsLogJoint());renderAll();renderPrior()},2);
+logSlider('#cE','#vE',()=>P.eta,v=>{P.eta=v;if(G.samples)G.samples=null;if(algo==='gibbs')pushTrace(G.trace,G.sweep+G.pos/corpus.tokens.length,gibbsLogJoint());renderAll();renderPrior()},2);
+$('#bRedraw').addEventListener('click',()=>{priorSeed++;renderPrior()});
+
+function setAlgo(a){algo=a;stopRun();$('#algGibbs').setAttribute('aria-pressed',a==='gibbs');$('#algVI').setAttribute('aria-pressed',a==='vi');
+  $('#stepName').textContent=a==='gibbs'?'token':'update';$('#sweepName').textContent=a==='gibbs'?'Sweep':'Iteration';$('#collectWrap').style.display=a==='gibbs'?'':'none';renderAll()}
+$('#algGibbs').addEventListener('click',()=>setAlgo('gibbs'));
+$('#algVI').addEventListener('click',()=>setAlgo('vi'));
+$('#bReset').addEventListener('click',()=>{stopRun();resetInference()});
+$('#bStep').addEventListener('click',()=>{stopRun();stepOne();renderAll()});
+$('#bDoc').addEventListener('click',()=>{stopRun();stepDoc();renderAll()});
+$('#bSweep').addEventListener('click',()=>{stopRun();stepSweep();renderAll()});
+$('#bRun').addEventListener('click',()=>ui.running?stopRun():startRun());
+$('#cCollect').addEventListener('change',e=>{ui.collect=e.target.checked;if(G.samples)G.samples=null;renderAll()});
+$('#cCompare').addEventListener('change',e=>{ui.compare=e.target.checked;renderAll();renderPrior()});
+const sp=$('#cSpeed');sp.value=ui.speedIdx;const showSpeed=()=>{const v=SPEEDS[ui.speedIdx];$('#vSpeed').textContent=v==='max'?(algo==='gibbs'?'1 sweep/frame':'1 iteration/frame'):`${v} steps/s`};showSpeed();
+sp.addEventListener('input',()=>{ui.speedIdx=+sp.value;showSpeed()});
+
+let lastTs=0,acc=0;
+function startRun(){ui.running=true;$('#bRun').innerHTML='Pause <kbd>R</kbd>';lastTs=performance.now();acc=0;requestAnimationFrame(loop)}
+function stopRun(){ui.running=false;$('#bRun').innerHTML='Run <kbd>R</kbd>'}
+function loop(ts){
+  if(!ui.running)return;
+  const dt=Math.min((ts-lastTs)/1000,0.25);lastTs=ts;const v=SPEEDS[ui.speedIdx];
+  if(v==='max'){stepSweep()}else{acc+=dt*v;let n=Math.min(Math.floor(acc),400);acc-=n;while(n-->0)stepOne()}
+  renderAll();requestAnimationFrame(loop);
+}
+document.addEventListener('keydown',e=>{
+  if(e.target.matches('input,textarea,select')||e.metaKey||e.ctrlKey||e.altKey)return;
+  const k=e.key.toLowerCase();
+  if(k==='s'){$('#bStep').click()}else if(k==='d'){$('#bDoc').click()}else if(k==='w'){$('#bSweep').click()}else if(k==='r'){$('#bRun').click()}else if(k==='0'){$('#bReset').click()}else return;
+  e.preventDefault();
+});
+
+/* ---------------- boot ---------------- */
+makeCorpus();gibbsInit();viInit();renderAll();renderPrior();
+})();
+</script>
+</body>
+</html>
