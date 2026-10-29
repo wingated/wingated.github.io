@@ -1,0 +1,731 @@
+<title>Gaussian Process Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=STIX+Two+Text:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+/* Layout: a one-screen lab bench. Header strip with the posterior formulas, then two equal panes:
+   the 2D posterior canvas + controls on the left, the 3D density surface on the right. Dark by design. */
+:root{
+  color-scheme:dark;
+  --bg:#0b0e13; --surface:#14171c; --surface-2:#1b2028; --surface-3:#222835; --line:#262c36; --line-2:#323a47;
+  --ink:#e9ecf1; --ink-2:#a7afbd; --ink-3:#6f7786;
+  --mean:#3987e5; --band:rgba(57,135,229,.18); --pt:#e0a52a; --sample:#199e70; --slice:#e8589a; --slice-bright:#ff8ac4;
+  --focus:#86b6ef;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --font-math:"STIX Two Text","Times New Roman",Georgia,serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:13px;line-height:1.4;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0}
+.app{height:100%;display:flex;flex-direction:column;gap:10px;padding-block:10px}
+header{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;padding:0 2px}
+h1{font-family:var(--font-math);font-weight:500;font-size:22px;margin:0;letter-spacing:.005em;text-wrap:balance}
+.formula{font-family:var(--font-math);font-size:15px;color:var(--ink-2);white-space:nowrap}
+.formula i{font-style:italic}
+.formula sub,.formula sup{font-size:.7em}
+.lml{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lml b{color:var(--ink);font-weight:500}
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.pane{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.pane-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:7px 12px;border-bottom:1px solid var(--line);font-size:11px;color:var(--ink-2);letter-spacing:.07em;text-transform:uppercase}
+.pane-head .title{color:var(--ink);font-weight:600}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-left:auto;text-transform:none;letter-spacing:0;font-size:11.5px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:0;border-top:2px solid;border-radius:2px}
+.sw.band{height:9px;border:0;background:var(--band);outline:1px solid rgba(57,135,229,.5)}
+.sw.pt{width:9px;height:9px;border:0;border-radius:50%;background:var(--pt)}
+.sw.sample{border-top-style:dashed;border-color:var(--sample)}
+.sw.slice{border-color:var(--slice)}
+.sw.mean{border-color:var(--mean)}
+.left{overflow-y:auto}
+.plot-wrap{flex:1 1 260px;min-height:230px;position:relative}
+canvas{display:block;width:100%;height:100%}
+#plot2d{cursor:crosshair;touch-action:none}
+.xrow{display:flex;align-items:center;gap:10px;padding:4px 12px 2px 12px;border-top:1px solid var(--line)}
+.xrow label{font-family:var(--font-math);font-size:15px;color:var(--slice-bright);min-width:22px}
+.xrow input{flex:1;accent-color:var(--slice)}
+.xrow output{font-family:var(--font-mono);font-size:12px;min-width:48px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.controls{padding:8px 12px 12px;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line)}
+.ctl-label{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);padding:4px 9px;border-radius:6px;font:inherit;font-size:12px;cursor:pointer}
+.seg button:hover{border-color:var(--line-2);color:var(--ink)}
+.seg button[aria-pressed="true"]{background:rgba(57,135,229,.16);border-color:var(--mean);color:var(--ink)}
+.kformula{font-family:var(--font-math);font-size:14.5px;color:var(--ink-2);margin-top:6px;min-height:1.4em}
+.kformula sub,.kformula sup{font-size:.72em}
+.sliders{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;align-items:center}
+.sliders label{font-family:var(--font-math);font-size:15px;color:var(--ink);white-space:nowrap}
+.sliders label small{font-family:var(--font-ui);font-size:11px;color:var(--ink-3);margin-left:4px}
+.sliders input[type=range]{width:100%;accent-color:var(--mean);margin:0}
+.sliders output{font-family:var(--font-mono);font-size:12px;min-width:68px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.sliders output.off{color:var(--sample)}
+.toggles{display:flex;flex-wrap:wrap;gap:6px 18px}
+.toggles label{display:inline-flex;align-items:center;gap:7px;color:var(--ink-2);cursor:pointer;font-size:12.5px}
+.toggles input{accent-color:var(--mean);width:15px;height:15px;margin:0}
+.actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.btn{background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink);padding:5px 10px;border-radius:6px;font:inherit;font-size:12px;cursor:pointer}
+.btn:hover{background:var(--surface-3)}
+.btn.primary{border-color:var(--mean);background:rgba(57,135,229,.16)}
+.btn.danger:hover{border-color:#e66767}
+select.btn{padding-right:6px}
+.hint{font-size:11.5px;color:var(--ink-3)}
+.hint kbd{font-family:var(--font-ui);color:var(--ink-2)}
+.gl-wrap{flex:1;min-height:300px;position:relative;background:var(--surface)}
+#gl{touch-action:none;cursor:grab}
+#gl:active{cursor:grabbing}
+.overlay{position:absolute;pointer-events:none;font-size:12px}
+.readout{left:10px;top:10px;background:rgba(11,14,19,.72);border:1px solid var(--line);border-radius:8px;padding:8px 11px;backdrop-filter:blur(4px);font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--ink-2);line-height:1.55}
+.readout .big{font-family:var(--font-math);font-size:16px;color:var(--slice-bright)}
+.readout b{color:var(--ink);font-weight:500}
+.viewctl{right:10px;top:10px;pointer-events:auto;display:flex;flex-direction:column;gap:5px;background:rgba(11,14,19,.72);border:1px solid var(--line);border-radius:8px;padding:8px 10px;backdrop-filter:blur(4px)}
+.viewctl label{display:grid;grid-template-columns:52px 90px;gap:6px;align-items:center;color:var(--ink-2);font-size:11px}
+.viewctl input[type=range]{width:100%;accent-color:var(--mean);margin:0}
+.viewctl .row{display:flex;gap:6px;align-items:center;justify-content:space-between}
+.viewctl .row label{display:inline-flex;gap:5px;grid-template-columns:none;cursor:pointer}
+.viewctl input[type=checkbox]{accent-color:var(--mean);margin:0}
+.viewctl .btn{padding:3px 8px;font-size:11px}
+.axisnote{left:10px;bottom:8px;color:var(--ink-3);font-size:11px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+@media (max-width:900px){
+  html,body{height:auto}
+  .app{height:auto}
+  main{display:flex;flex-direction:column}
+  .left{overflow:visible}
+  .plot-wrap{flex:none;height:300px}
+  .gl-wrap{height:400px}
+  .lml{margin-left:0;flex-basis:100%}
+  .viewctl label{grid-template-columns:48px 70px}
+}
+@media (prefers-reduced-motion:reduce){ * { transition:none !important } }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Gaussian Process Explorer</h1>
+    <span class="formula"><i>μ</i>(<i>x</i><sub>*</sub>) = <i>k</i><sub>*</sub><sup>⊤</sup>(<i>K</i> + <i>σ</i><sub>n</sub><sup>2</sup><i>I</i>)<sup>−1</sup><i>y</i></span>
+    <span class="formula"><i>σ</i><sup>2</sup>(<i>x</i><sub>*</sub>) = <i>k</i>(<i>x</i><sub>*</sub>,<i>x</i><sub>*</sub>) − <i>k</i><sub>*</sub><sup>⊤</sup>(<i>K</i> + <i>σ</i><sub>n</sub><sup>2</sup><i>I</i>)<sup>−1</sup><i>k</i><sub>*</sub></span>
+    <span class="lml" id="lml">no observations</span>
+  </header>
+
+  <main>
+    <section class="pane left" aria-label="Posterior over functions">
+      <div class="pane-head">
+        <span class="title">Posterior over f(x)</span>
+        <span class="legend">
+          <span><i class="sw mean"></i>mean</span>
+          <span><i class="sw band"></i>95% band</span>
+          <span><i class="sw sample"></i>samples</span>
+          <span><i class="sw pt"></i>data</span>
+          <span><i class="sw slice"></i>p(y | x*)</span>
+        </span>
+      </div>
+      <div class="plot-wrap"><canvas id="plot2d" aria-label="Interactive 2D plot. Click to add points."></canvas></div>
+      <div class="xrow">
+        <label for="xstar"><i>x</i><sub>*</sub></label>
+        <input type="range" id="xstar" min="0" max="10" step="0.01" value="5">
+        <output id="xstarVal" for="xstar">5.00</output>
+      </div>
+      <div class="controls">
+        <div>
+          <div class="ctl-label">Covariance kernel</div>
+          <div class="seg" id="kernels" role="group" aria-label="Kernel"></div>
+          <div class="kformula" id="kformula"></div>
+        </div>
+        <div class="sliders">
+          <label for="ell"><i>ℓ</i><small>lengthscale / bandwidth</small></label>
+          <input type="range" id="ell" min="-1.3" max="1" step="0.01" value="0">
+          <output id="ellVal" for="ell">1.00</output>
+
+          <label for="sf"><i>σ</i><sub>f</sub><small>signal amplitude</small></label>
+          <input type="range" id="sf" min="-0.7" max="0.5" step="0.01" value="0">
+          <output id="sfVal" for="sf">1.00</output>
+
+          <label for="sn"><i>σ</i><sub>n</sub><small>observation noise</small></label>
+          <input type="range" id="sn" min="0" max="1" step="0.005" value="0.3162">
+          <output id="snVal" for="sn">0.100</output>
+
+          <label for="period" id="periodLabel" hidden><i>p</i><small>period</small></label>
+          <input type="range" id="period" min="0.5" max="5" step="0.05" value="2" hidden>
+          <output id="periodVal" for="period" hidden>2.00</output>
+        </div>
+        <div class="toggles">
+          <label><input type="checkbox" id="showSamples" checked> Draw 3 posterior samples</label>
+          <label><input type="checkbox" id="noisyPred"> Band &amp; density include noise (predict noisy <i>y</i>, not <i>f</i>)</label>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="fitBtn" type="button" title="Maximize the log marginal likelihood over ℓ, σf, σn">Fit ℓ, σ<sub>f</sub>, σ<sub>n</sub> by marginal likelihood</button>
+          <button class="btn" id="resampleBtn" type="button">Redraw samples</button>
+          <select class="btn" id="preset" aria-label="Generate data from a hidden function">
+            <option value="">Generate data…</option>
+            <option value="smooth">Smooth wave (10 pts)</option>
+            <option value="step">Step function (12 pts)</option>
+            <option value="bump">Single bump (9 pts)</option>
+            <option value="periodic">Periodic, period 2 (14 pts)</option>
+            <option value="linear">Linear trend (8 pts)</option>
+            <option value="sparse">Two clusters (8 pts)</option>
+          </select>
+          <button class="btn danger" id="clearBtn" type="button">Clear all points</button>
+        </div>
+        <div class="hint"><kbd>Click</kbd> empty space to add a point · <kbd>drag</kbd> a point to move it · <kbd>click</kbd> a point to remove it · <kbd>drag</kbd> the pink line to move <i>x</i><sub>*</sub> · drag the 3D view to orbit, scroll to zoom</div>
+      </div>
+    </section>
+
+    <section class="pane right" aria-label="Conditional density p(y given x)">
+      <div class="pane-head">
+        <span class="title">Density p(y | x)</span>
+        <span>surface = posterior density over the whole x–y plane · opaque slice = p(y | x*)</span>
+      </div>
+      <div class="gl-wrap">
+        <canvas id="gl" aria-label="3D plot of the conditional density"></canvas>
+        <div class="overlay readout" id="readout"></div>
+        <div class="overlay viewctl">
+          <label for="hscale">Height <input type="range" id="hscale" min="0.1" max="1.5" step="0.025" value="0.4"></label>
+          <label for="opacity">Opacity <input type="range" id="opacity" min="0.1" max="1" step="0.05" value="0.55"></label>
+          <div class="row">
+            <label><input type="checkbox" id="spin"> Orbit slowly</label>
+            <button class="btn" id="resetView" type="button">Reset view</button>
+          </div>
+        </div>
+        <div class="overlay axisnote">x runs left→right · y runs back→front · height = density (σ floored at 0.1 for display)</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+'use strict';
+const $ = id => document.getElementById(id);
+const XMIN=0, XMAX=10, YMIN=-3, YMAX=3;
+const NX=240, NY=160, MS=96, SDFLOOR=0.1, Z95=1.959964;
+const COL={mean:'#3987e5',pt:'#e0a52a',sample:'#199e70',slice:'#e8589a',sliceBright:'#ff8ac4',ink:'#e9ecf1',ink2:'#a7afbd',ink3:'#6f7786',grid:'#20252e',axis:'#323a47',surface:'#14171c'};
+
+const linspace=(a,b,n)=>Array.from({length:n},(_,i)=>a+(b-a)*i/(n-1));
+const XS=linspace(XMIN,XMAX,NX), YS=linspace(YMIN,YMAX,NY), XSS=linspace(XMIN,XMAX,MS);
+const SQ3=Math.sqrt(3), SQ5=Math.sqrt(5);
+
+const KERNELS={
+  rbf:{label:'RBF (squared exp.)', formula:'<i>k</i>(<i>x</i>, <i>x</i>′) = <i>σ</i><sub>f</sub><sup>2</sup> exp(−(<i>x</i> − <i>x</i>′)<sup>2</sup> / 2<i>ℓ</i><sup>2</sup>) — infinitely smooth',
+       f:(r,l)=>Math.exp(-r*r/(2*l*l))},
+  m52:{label:'Matérn 5/2', formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> (1 + √5 <i>r</i>/<i>ℓ</i> + 5<i>r</i><sup>2</sup>/3<i>ℓ</i><sup>2</sup>) exp(−√5 <i>r</i>/<i>ℓ</i>), <i>r</i> = |<i>x</i> − <i>x</i>′| — twice differentiable',
+       f:(r,l)=>{const a=SQ5*r/l; return (1+a+a*a/3)*Math.exp(-a);}},
+  m32:{label:'Matérn 3/2', formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> (1 + √3 <i>r</i>/<i>ℓ</i>) exp(−√3 <i>r</i>/<i>ℓ</i>) — once differentiable',
+       f:(r,l)=>{const a=SQ3*r/l; return (1+a)*Math.exp(-a);}},
+  exp:{label:'Exponential (OU)', formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> exp(−<i>r</i>/<i>ℓ</i>) — Matérn 1/2, continuous but rough (Ornstein–Uhlenbeck)',
+       f:(r,l)=>Math.exp(-r/l)},
+  rq:{label:'Rational quadratic', formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> (1 + <i>r</i><sup>2</sup> / 2<i>αℓ</i><sup>2</sup>)<sup>−<i>α</i></sup>, <i>α</i> = 2 — a scale mixture of RBFs',
+       f:(r,l)=>Math.pow(1+r*r/(4*l*l),-2)},
+  per:{label:'Periodic', formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> exp(−2 sin<sup>2</sup>(π<i>r</i>/<i>p</i>) / <i>ℓ</i><sup>2</sup>) — exactly repeats every <i>p</i>',
+       f:(r,l,p)=>{const s=Math.sin(Math.PI*r/p); return Math.exp(-2*s*s/(l*l));}},
+  lin:{label:'Linear', nonstationary:true, formula:'<i>k</i>(<i>x</i>, <i>x</i>′) = <i>σ</i><sub>f</sub><sup>2</sup> (1 + <i>u</i> <i>u</i>′), <i>u</i> = (<i>x</i> − 5)/<i>ℓ</i> — Bayesian linear regression; every sample is a straight line',
+       f:(r,l,p,x1,x2)=>1+(x1-5)*(x2-5)/(l*l)},
+  p2:{label:'Polynomial d=2', nonstationary:true, formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> (1 + <i>u</i> <i>u</i>′)<sup>2</sup>, <i>u</i> = (<i>x</i> − 5)/<i>ℓ</i> — samples are quadratics; <i>ℓ</i> sets how fast the prior variance grows away from <i>x</i> = 5',
+       f:(r,l,p,x1,x2)=>Math.pow(1+(x1-5)*(x2-5)/(l*l),2)},
+  p3:{label:'Polynomial d=3', nonstationary:true, formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> (1 + <i>u</i> <i>u</i>′)<sup>3</sup>, <i>u</i> = (<i>x</i> − 5)/<i>ℓ</i> — samples are cubics',
+       f:(r,l,p,x1,x2)=>Math.pow(1+(x1-5)*(x2-5)/(l*l),3)},
+  p4:{label:'Polynomial d=4', nonstationary:true, formula:'<i>k</i> = <i>σ</i><sub>f</sub><sup>2</sup> (1 + <i>u</i> <i>u</i>′)<sup>4</sup>, <i>u</i> = (<i>x</i> − 5)/<i>ℓ</i> — samples are quartics',
+       f:(r,l,p,x1,x2)=>Math.pow(1+(x1-5)*(x2-5)/(l*l),4)},
+};
+
+const state={points:[], kernel:'rbf', ell:1.0, sf:1.0, sn:0.1, period:2.0, xstar:5,
+             showSamples:true, noisyPred:false, hscale:0.4, opacity:0.55, spin:false};
+
+/* ---------- Linear algebra ---------- */
+function cholesky(A,n){
+  const L=new Float64Array(n*n);
+  for(let i=0;i<n;i++){
+    for(let j=0;j<=i;j++){
+      let s=A[i*n+j];
+      for(let k=0;k<j;k++) s-=L[i*n+k]*L[j*n+k];
+      if(i===j){ if(!(s>0)) return null; L[i*n+i]=Math.sqrt(s); }
+      else L[i*n+j]=s/L[j*n+j];
+    }
+  }
+  return L;
+}
+function cholJitter(A,n){
+  let jit=1e-9;
+  for(let t=0;t<9;t++){
+    const B=Float64Array.from(A);
+    for(let i=0;i<n;i++) B[i*n+i]+=jit;
+    const L=cholesky(B,n); if(L) return L;
+    jit*=10;
+  }
+  return null;
+}
+function fwd(L,n,b){ const x=new Float64Array(n); for(let i=0;i<n;i++){ let s=b[i]; for(let k=0;k<i;k++) s-=L[i*n+k]*x[k]; x[i]=s/L[i*n+i]; } return x; }
+function bwd(L,n,b){ const x=new Float64Array(n); for(let i=n-1;i>=0;i--){ let s=b[i]; for(let k=i+1;k<n;k++) s-=L[k*n+i]*x[k]; x[i]=s/L[i*n+i]; } return x; }
+
+/* ---------- Gaussian process ---------- */
+function kern(x1,x2,hp){ return hp.sf*hp.sf*KERNELS[hp.kernel].f(Math.abs(x1-x2),hp.ell,hp.period,x1,x2); }
+function hpNow(){ return {kernel:state.kernel, ell:state.ell, sf:state.sf, sn:state.sn, period:state.period}; }
+
+function fitGP(points,hp){
+  const n=points.length; if(!n) return null;
+  const X=points.map(p=>p.x), y=points.map(p=>p.y);
+  const K=new Float64Array(n*n);
+  for(let i=0;i<n;i++){ for(let j=0;j<=i;j++){ const v=kern(X[i],X[j],hp); K[i*n+j]=v; K[j*n+i]=v; } K[i*n+i]+=hp.sn*hp.sn; }
+  const L=cholJitter(K,n); if(!L) return null;
+  const alpha=bwd(L,n,fwd(L,n,y));
+  let lml=0;
+  for(let i=0;i<n;i++){ lml-=0.5*y[i]*alpha[i]; lml-=Math.log(L[i*n+i]); }
+  lml-=0.5*n*Math.log(2*Math.PI);
+  return {n,X,L,alpha,lml};
+}
+function predict(gp,hp,xs){
+  const m=xs.length, mu=new Float64Array(m), va=new Float64Array(m);
+  if(!gp){ for(let i=0;i<m;i++) va[i]=kern(xs[i],xs[i],hp); return {mu,va}; }
+  const n=gp.n, ks=new Float64Array(n);
+  for(let i=0;i<m;i++){
+    const kxx=kern(xs[i],xs[i],hp);
+    let s=0;
+    for(let j=0;j<n;j++){ ks[j]=kern(xs[i],gp.X[j],hp); s+=ks[j]*gp.alpha[j]; }
+    mu[i]=s;
+    const v=fwd(gp.L,n,ks); let q=0; for(let j=0;j<n;j++) q+=v[j]*v[j];
+    va[i]=Math.max(0,kxx-q);
+  }
+  return {mu,va};
+}
+function posteriorSamples(gp,hp,xs,Z){
+  const m=xs.length, K=new Float64Array(m*m), mu=new Float64Array(m);
+  for(let i=0;i<m;i++) for(let j=0;j<=i;j++){ const v=kern(xs[i],xs[j],hp); K[i*m+j]=v; K[j*m+i]=v; }
+  if(gp){
+    const n=gp.n, V=new Array(m);
+    for(let i=0;i<m;i++){
+      const ks=new Float64Array(n); let s=0;
+      for(let j=0;j<n;j++){ ks[j]=kern(xs[i],gp.X[j],hp); s+=ks[j]*gp.alpha[j]; }
+      mu[i]=s; V[i]=fwd(gp.L,n,ks);
+    }
+    for(let i=0;i<m;i++) for(let j=0;j<=i;j++){ let q=0; const a=V[i],b=V[j]; for(let k=0;k<n;k++) q+=a[k]*b[k]; K[i*m+j]-=q; K[j*m+i]=K[i*m+j]; }
+  }
+  const L=cholJitter(K,m); if(!L) return [];
+  return Z.map(z=>{ const f=new Float64Array(m); for(let i=0;i<m;i++){ let s=mu[i]; for(let k=0;k<=i;k++) s+=L[i*m+k]*z[k]; f[i]=s; } return f; });
+}
+function randn(){ let u=0,v=0; while(u===0) u=Math.random(); while(v===0) v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); }
+let Z=[0,1,2].map(()=>Float64Array.from({length:MS},randn));
+const pdf=(y,mu,sd)=>Math.exp(-0.5*((y-mu)/sd)**2)/(sd*Math.sqrt(2*Math.PI));
+
+/* ---------- Model state ---------- */
+let model=null;
+function recompute(){
+  const hp=hpNow();
+  const gp=fitGP(state.points,hp);
+  const {mu,va}=predict(gp,hp,XS);
+  const add=state.noisyPred? hp.sn*hp.sn : 0;
+  const sd=new Float64Array(NX); for(let i=0;i<NX;i++) sd[i]=Math.sqrt(va[i]+add);
+  const star=predict(gp,hp,[state.xstar]);
+  const samples=state.showSamples? posteriorSamples(gp,hp,XSS,Z) : [];
+  model={gp,mu,sd,samples,muStar:star.mu[0],sdStar:Math.sqrt(star.va[0]+add),lml:gp?gp.lml:NaN};
+  draw2D(); update3D(); updateReadouts();
+}
+function recomputeStar(){ // only x* changed: cheap path
+  if(!model) return recompute();
+  const hp=hpNow(); const add=state.noisyPred? hp.sn*hp.sn : 0;
+  const star=predict(model.gp,hp,[state.xstar]);
+  model.muStar=star.mu[0]; model.sdStar=Math.sqrt(star.va[0]+add);
+  draw2D(); updateSlice(); updateReadouts();
+}
+function updateReadouts(){
+  const n=state.points.length;
+  $('lml').innerHTML = n? `n = ${n} &nbsp;·&nbsp; log p(y | X, θ) = <b>${model.lml.toFixed(2)}</b>` : 'no observations — showing the GP prior';
+  const mu=model.muStar, sd=model.sdStar;
+  $('readout').innerHTML = `<div class="big">p(y | x<sub>*</sub> = ${state.xstar.toFixed(2)})</div>`+
+    `μ = <b>${fmt(mu)}</b> &nbsp; σ = <b>${fmt(sd)}</b><br>95%: [<b>${fmt(mu-Z95*sd)}</b>, <b>${fmt(mu+Z95*sd)}</b>]<br>`+
+    `peak density ${fmt(pdf(mu,mu,sd))}`;
+  $('xstarVal').value=state.xstar.toFixed(2);
+}
+function fmt(v){ return (v<0?'−':'')+Math.abs(v).toFixed(3); }
+
+/* ---------- 2D canvas ---------- */
+const plot=$('plot2d'), pctx=plot.getContext('2d');
+const PAD={l:44,r:16,t:16,b:26};
+let view={w:0,h:0,sx:x=>x,sy:y=>y,ix:p=>p,iy:p=>p};
+let hoverIdx=-1, nearSlice=false;
+function resize2D(){
+  const r=plot.parentElement.getBoundingClientRect(); const dpr=Math.min(window.devicePixelRatio||1,2);
+  plot.width=Math.max(1,Math.round(r.width*dpr)); plot.height=Math.max(1,Math.round(r.height*dpr));
+  pctx.setTransform(dpr,0,0,dpr,0,0);
+  const w=r.width,h=r.height, pw=w-PAD.l-PAD.r, ph=h-PAD.t-PAD.b;
+  view={w,h,pw,ph,
+    sx:x=>PAD.l+(x-XMIN)/(XMAX-XMIN)*pw, sy:y=>PAD.t+(YMAX-y)/(YMAX-YMIN)*ph,
+    ix:px=>XMIN+(px-PAD.l)/pw*(XMAX-XMIN), iy:py=>YMAX-(py-PAD.t)/ph*(YMAX-YMIN)};
+  $('xstar').style.marginLeft=(PAD.l-22)+'px';
+  if(model) draw2D();
+}
+function draw2D(){
+  const c=pctx, {w,h,sx,sy,pw,ph}=view; if(!w) return;
+  c.clearRect(0,0,w,h); c.fillStyle=COL.surface; c.fillRect(0,0,w,h);
+  // grid
+  c.lineWidth=1; c.strokeStyle=COL.grid; c.beginPath();
+  for(let x=XMIN;x<=XMAX;x++){ const px=Math.round(sx(x))+.5; c.moveTo(px,PAD.t); c.lineTo(px,PAD.t+ph); }
+  for(let y=YMIN;y<=YMAX;y++){ const py=Math.round(sy(y))+.5; c.moveTo(PAD.l,py); c.lineTo(PAD.l+pw,py); }
+  c.stroke();
+  c.strokeStyle=COL.axis; c.beginPath(); const y0=Math.round(sy(0))+.5; c.moveTo(PAD.l,y0); c.lineTo(PAD.l+pw,y0); c.stroke();
+  c.fillStyle=COL.ink3; c.font='11px "IBM Plex Mono", monospace'; c.textAlign='center'; c.textBaseline='top';
+  for(let x=XMIN;x<=XMAX;x+=2) c.fillText(x,sx(x),PAD.t+ph+6);
+  c.textAlign='right'; c.textBaseline='middle';
+  for(let y=YMIN;y<=YMAX;y++) c.fillText(y,PAD.l-8,sy(y));
+  c.font='italic 13px "STIX Two Text", serif'; c.fillStyle=COL.ink2;
+  c.textAlign='left'; c.textBaseline='top'; c.fillText('y',PAD.l-30,PAD.t-2);
+  c.textAlign='right'; c.fillText('x',PAD.l+pw,PAD.t+ph+4);
+
+  c.save(); c.beginPath(); c.rect(PAD.l,PAD.t,pw,ph); c.clip();
+  const {mu,sd,samples}=model;
+  // 95% band
+  c.beginPath();
+  for(let i=0;i<NX;i++){ const px=sx(XS[i]), py=sy(mu[i]+Z95*sd[i]); i?c.lineTo(px,py):c.moveTo(px,py); }
+  for(let i=NX-1;i>=0;i--) c.lineTo(sx(XS[i]),sy(mu[i]-Z95*sd[i]));
+  c.closePath(); c.fillStyle='rgba(57,135,229,.17)'; c.fill();
+  c.strokeStyle='rgba(57,135,229,.55)'; c.lineWidth=1; c.stroke();
+  // samples
+  if(samples.length){
+    c.lineWidth=1.25; c.strokeStyle=COL.sample; c.globalAlpha=.8; c.setLineDash([5,3]);
+    for(const f of samples){ c.beginPath(); for(let i=0;i<MS;i++){ const px=sx(XSS[i]),py=sy(f[i]); i?c.lineTo(px,py):c.moveTo(px,py);} c.stroke(); }
+    c.setLineDash([]); c.globalAlpha=1;
+  }
+  // mean
+  c.beginPath(); for(let i=0;i<NX;i++){ const px=sx(XS[i]),py=sy(mu[i]); i?c.lineTo(px,py):c.moveTo(px,py); }
+  c.strokeStyle=COL.mean; c.lineWidth=2.2; c.stroke();
+  // slice: vertical line + sideways Gaussian
+  const xs0=sx(state.xstar), ms=model.muStar, ss=Math.max(model.sdStar,SDFLOOR), bellPx=70*state.hscale;
+  c.beginPath();
+  for(let j=0;j<NY;j++){ const y=YS[j]; const px=xs0+pdf(y,ms,ss)*bellPx; const py=sy(y); j?c.lineTo(px,py):c.moveTo(px,py); }
+  c.lineTo(xs0,sy(YMAX)); c.lineTo(xs0,sy(YMIN)); c.closePath();
+  c.fillStyle='rgba(232,88,154,.22)'; c.fill();
+  c.beginPath();
+  for(let j=0;j<NY;j++){ const y=YS[j]; const px=xs0+pdf(y,ms,ss)*bellPx; const py=sy(y); j?c.lineTo(px,py):c.moveTo(px,py); }
+  c.strokeStyle=COL.sliceBright; c.lineWidth=2; c.stroke();
+  c.beginPath(); c.moveTo(xs0,PAD.t); c.lineTo(xs0,PAD.t+ph); c.strokeStyle=COL.slice; c.lineWidth=nearSlice?2.5:1.5; c.setLineDash([4,3]); c.stroke(); c.setLineDash([]);
+  // μ(x*) marker and 95% whisker
+  c.beginPath(); c.moveTo(xs0-6,sy(ms-Z95*model.sdStar)); c.lineTo(xs0+6,sy(ms-Z95*model.sdStar));
+  c.moveTo(xs0-6,sy(ms+Z95*model.sdStar)); c.lineTo(xs0+6,sy(ms+Z95*model.sdStar)); c.strokeStyle=COL.sliceBright; c.lineWidth=1.5; c.stroke();
+  c.beginPath(); c.arc(xs0,sy(ms),4,0,Math.PI*2); c.fillStyle=COL.sliceBright; c.fill(); c.strokeStyle=COL.surface; c.lineWidth=1.5; c.stroke();
+  // points (+ noise whiskers)
+  const sn=state.sn;
+  state.points.forEach((p,i)=>{
+    const px=sx(p.x),py=sy(p.y);
+    if(sn>0){ c.beginPath(); c.moveTo(px,sy(p.y-Z95*sn)); c.lineTo(px,sy(p.y+Z95*sn)); c.strokeStyle='rgba(224,165,42,.45)'; c.lineWidth=1.5; c.stroke(); }
+    c.beginPath(); c.arc(px,py,i===hoverIdx?7.5:5.5,0,Math.PI*2); c.fillStyle=COL.pt; c.fill();
+    c.lineWidth=2; c.strokeStyle=i===hoverIdx?COL.ink:COL.surface; c.stroke();
+  });
+  c.restore();
+  // slice readout
+  c.font='11.5px "IBM Plex Mono", monospace'; c.fillStyle=COL.sliceBright; c.textBaseline='top';
+  const label=`x*=${state.xstar.toFixed(2)}  μ=${ms.toFixed(2)}  σ=${model.sdStar.toFixed(2)}`;
+  const tw=c.measureText(label).width; const left=xs0+8+tw>PAD.l+pw;
+  c.textAlign=left?'right':'left'; c.fillText(label,left?xs0-8:xs0+8,PAD.t+2);
+  if(!state.points.length){ c.textAlign='center'; c.fillStyle=COL.ink3; c.font='12px "IBM Plex Sans", sans-serif'; c.fillText('GP prior: mean 0, variance k(x, x).  Click anywhere to add an observation.',PAD.l+pw/2,PAD.t+ph-22); }
+}
+// interaction
+let drag=null;
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+function nearestPoint(px,py,rad){ let best=-1,bd=rad*rad; state.points.forEach((p,i)=>{ const dx=view.sx(p.x)-px, dy=view.sy(p.y)-py, d=dx*dx+dy*dy; if(d<bd){bd=d;best=i;} }); return best; }
+function inPlot(px,py){ return px>=PAD.l&&px<=PAD.l+view.pw&&py>=PAD.t&&py<=PAD.t+view.ph; }
+function setXstar(x){ state.xstar=clamp(x,XMIN,XMAX); $('xstar').value=state.xstar; recomputeStar(); }
+plot.addEventListener('pointerdown',e=>{
+  const px=e.offsetX,py=e.offsetY; if(!inPlot(px,py)) return;
+  plot.setPointerCapture(e.pointerId);
+  const idx=nearestPoint(px,py,12);
+  if(idx>=0) drag={type:'point',idx,x0:px,y0:py,moved:false};
+  else if(Math.abs(view.sx(state.xstar)-px)<9) drag={type:'slice'};
+  else drag={type:'add',x0:px,y0:py,moved:false};
+  e.preventDefault();
+});
+plot.addEventListener('pointermove',e=>{
+  const px=e.offsetX,py=e.offsetY;
+  if(drag){
+    if(drag.type==='slice'){ setXstar(view.ix(px)); return; }
+    const far=Math.hypot(px-drag.x0,py-drag.y0)>4;
+    if(far) drag.moved=true;
+    if(drag.type==='point'&&drag.moved){
+      const p=state.points[drag.idx]; p.x=clamp(view.ix(px),XMIN,XMAX); p.y=clamp(view.iy(py),YMIN,YMAX); recompute();
+    }
+    return;
+  }
+  const idx=nearestPoint(px,py,12); const ns=idx<0&&Math.abs(view.sx(state.xstar)-px)<9;
+  if(idx!==hoverIdx||ns!==nearSlice){ hoverIdx=idx; nearSlice=ns; plot.style.cursor=idx>=0?'pointer':ns?'ew-resize':'crosshair'; draw2D(); }
+});
+function endDrag(e){
+  if(!drag) return;
+  const px=e.offsetX,py=e.offsetY;
+  if(drag.type==='point'&&!drag.moved){ state.points.splice(drag.idx,1); hoverIdx=-1; recompute(); }
+  else if(drag.type==='add'&&!drag.moved&&inPlot(px,py)){ state.points.push({x:view.ix(px),y:view.iy(py)}); recompute(); }
+  drag=null;
+}
+plot.addEventListener('pointerup',endDrag);
+plot.addEventListener('pointercancel',()=>{drag=null;});
+plot.addEventListener('pointerleave',()=>{ if(!drag&&(hoverIdx>=0||nearSlice)){hoverIdx=-1;nearSlice=false;draw2D();} });
+
+/* ---------- 3D scene ---------- */
+const glc=$('gl');
+const renderer=new THREE.WebGLRenderer({canvas:glc,antialias:true});
+renderer.setClearColor(0x14171c,1);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(38,1,0.1,300);
+scene.add(new THREE.HemisphereLight(0xc8d8ff,0x151820,0.95));
+const dl=new THREE.DirectionalLight(0xffffff,0.7); dl.position.set(5,12,7); scene.add(dl);
+const toX=x=>x-(XMIN+XMAX)/2, toZ=y=>-y;
+
+// floor + grid + axes
+{
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(XMAX-XMIN,YMAX-YMIN),new THREE.MeshBasicMaterial({color:0x10131a}));
+  floor.rotation.x=-Math.PI/2; floor.position.y=-0.01; scene.add(floor);
+  const g=[]; for(let x=XMIN;x<=XMAX;x++) g.push(toX(x),0,toZ(YMIN),toX(x),0,toZ(YMAX));
+  for(let y=YMIN;y<=YMAX;y++) g.push(toX(XMIN),0,toZ(y),toX(XMAX),0,toZ(y));
+  const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(g,3));
+  scene.add(new THREE.LineSegments(gg,new THREE.LineBasicMaterial({color:0x2a3140})));
+  const zl=[toX(XMIN),0,toZ(YMIN), toX(XMIN),1.7,toZ(YMIN)];
+  const zg=new THREE.BufferGeometry(); zg.setAttribute('position',new THREE.Float32BufferAttribute(zl,3));
+  scene.add(new THREE.Line(zg,new THREE.LineBasicMaterial({color:0x4a5466})));
+}
+function makeLabel(text,color,scale,italic){
+  const cv=document.createElement('canvas'); cv.width=256; cv.height=96; const x=cv.getContext('2d');
+  x.font=(italic?'italic ':'')+'52px "STIX Two Text", "Times New Roman", serif'; x.fillStyle=color; x.textAlign='center'; x.textBaseline='middle'; x.fillText(text,128,48);
+  const tex=new THREE.CanvasTexture(cv); tex.minFilter=THREE.LinearFilter;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false})); sp.scale.set(scale*2.6,scale,1); return sp;
+}
+function addLabel(text,pos,color,scale,italic){ const s=makeLabel(text,color||'#a7afbd',scale||0.6,italic); s.position.set(...pos); scene.add(s); }
+addLabel('x',[0,0.05,toZ(YMIN)+0.75],'#e9ecf1',0.7,true);
+addLabel('y',[toX(XMAX)+0.8,0.05,0],'#e9ecf1',0.7,true);
+addLabel('p(y|x)',[toX(XMIN),2.05,toZ(YMIN)],'#e9ecf1',0.7,true);
+for(const x of [0,5,10]) addLabel(String(x),[toX(x),0.02,toZ(YMIN)+0.4],'#6f7786',0.42,false);
+for(const y of [-3,0,3]) addLabel(y<0?'−3':String(y),[toX(XMAX)+0.45,0.02,toZ(y)],'#6f7786',0.42,false);
+
+// density surface
+const surfGeo=new THREE.BufferGeometry();
+const sPos=new Float32Array(NX*NY*3), sCol=new Float32Array(NX*NY*3), sDen=new Float32Array(NX*NY);
+{
+  const idx=[]; for(let i=0;i<NX-1;i++) for(let j=0;j<NY-1;j++){ const a=i*NY+j,b=(i+1)*NY+j,c=b+1,d=a+1; idx.push(a,b,d,b,c,d); }
+  surfGeo.setIndex(idx);
+  surfGeo.setAttribute('position',new THREE.BufferAttribute(sPos,3));
+  surfGeo.setAttribute('color',new THREE.BufferAttribute(sCol,3));
+  surfGeo.setAttribute('dens',new THREE.BufferAttribute(sDen,1));
+}
+const surfMat=new THREE.ShaderMaterial({
+  uniforms:{uOpacity:{value:state.opacity}},
+  vertexColors:true, transparent:true, depthWrite:false, side:THREE.DoubleSide,
+  vertexShader:`attribute float dens; varying vec3 vColor; varying float vT; varying vec3 vN;
+    void main(){ vColor=color; vT=dens; vN=normalize(normalMatrix*normal); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform float uOpacity; varying vec3 vColor; varying float vT; varying vec3 vN;
+    void main(){ vec3 n=normalize(vN); if(!gl_FrontFacing) n=-n; vec3 l=normalize(vec3(0.35,1.0,0.55));
+      float lam=0.62+0.38*max(dot(n,l),0.0); float a=uOpacity*(0.10+0.90*vT); gl_FragColor=vec4(vColor*lam,a); }`
+});
+const surf=new THREE.Mesh(surfGeo,surfMat); surf.renderOrder=10; scene.add(surf);
+// contour-style grid lines over the surface (shares the position buffer)
+{
+  const li=[]; const STEPX=15, STEPY=16;
+  for(let i=0;i<NX;i+=STEPX) for(let j=0;j<NY-1;j++) li.push(i*NY+j,i*NY+j+1);
+  for(let j=0;j<NY;j+=STEPY) for(let i=0;i<NX-1;i++) li.push(i*NY+j,(i+1)*NY+j);
+  const lg=new THREE.BufferGeometry(); lg.setAttribute('position',surfGeo.attributes.position); lg.setIndex(li);
+  const lines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x9ec5f4,transparent:true,opacity:0.16,depthWrite:false})); lines.renderOrder=11; scene.add(lines);
+}
+// sequential blue ramp (dark → light) for density
+const RAMP=['#0d366b','#1c5cab','#3987e5','#86b6ef','#cde2fb'].map(h=>new THREE.Color(h));
+function rampColor(t,out){ t=clamp(t,0,0.9999)*(RAMP.length-1); const i=Math.floor(t), f=t-i; out.copy(RAMP[i]).lerp(RAMP[i+1],f); return out; }
+const tmpC=new THREE.Color();
+
+// floor projections: band ribbon, mean tube, data spheres, x* marker
+const bandGeo=new THREE.BufferGeometry(); const bPos=new Float32Array(NX*2*3);
+{ const bi=[]; for(let i=0;i<NX-1;i++){ const a=2*i,b=a+1,c=a+2,d=a+3; bi.push(a,b,c,b,d,c); } bandGeo.setIndex(bi); bandGeo.setAttribute('position',new THREE.BufferAttribute(bPos,3)); }
+const band=new THREE.Mesh(bandGeo,new THREE.MeshBasicMaterial({color:0x3987e5,transparent:true,opacity:0.22,side:THREE.DoubleSide,depthWrite:false})); band.renderOrder=1; scene.add(band);
+let meanTube=null; const meanMat=new THREE.MeshBasicMaterial({color:0x3987e5});
+const ptGeo=new THREE.SphereGeometry(0.1,18,14), ptMat=new THREE.MeshStandardMaterial({color:0xe0a52a,emissive:0x5a4010,roughness:0.45});
+const ptGroup=new THREE.Group(); scene.add(ptGroup);
+const xmGeo=new THREE.BufferGeometry(); xmGeo.setAttribute('position',new THREE.Float32BufferAttribute([0,0.005,toZ(YMIN),0,0.005,toZ(YMAX)],3));
+const xMarker=new THREE.Line(xmGeo,new THREE.LineBasicMaterial({color:0xe8589a})); scene.add(xMarker);
+
+// the slice p(y | x*)
+const sliceGeo=new THREE.BufferGeometry(); const slPos=new Float32Array(NY*2*3), slCol=new Float32Array(NY*2*3);
+{ const si=[]; for(let j=0;j<NY-1;j++){ const a=2*j,b=a+1,c=a+2,d=a+3; si.push(a,c,b,b,c,d); } sliceGeo.setIndex(si);
+  sliceGeo.setAttribute('position',new THREE.BufferAttribute(slPos,3)); sliceGeo.setAttribute('color',new THREE.BufferAttribute(slCol,3)); }
+const slice=new THREE.Mesh(sliceGeo,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide})); scene.add(slice);
+let curveTube=null, glowTube=null;
+const curveMat=new THREE.MeshBasicMaterial({color:0xff8ac4});
+const glowMat=new THREE.MeshBasicMaterial({color:0xff8ac4,transparent:true,opacity:0.22,depthWrite:false,blending:THREE.AdditiveBlending});
+const muGeo=new THREE.BufferGeometry(); muGeo.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0,0,1,0],3));
+const muLine=new THREE.Line(muGeo,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.55})); scene.add(muLine);
+const SL_LO=new THREE.Color('#4a1a33'), SL_HI=new THREE.Color('#ff8ac4');
+
+function update3D(){
+  const {mu,sd}=model, H=state.hscale;
+  let k=0;
+  for(let i=0;i<NX;i++){
+    const X=toX(XS[i]), m=mu[i], s=Math.max(sd[i],SDFLOOR);
+    for(let j=0;j<NY;j++,k++){
+      const d=pdf(YS[j],m,s), t=1-Math.exp(-1.5*d);
+      sPos[3*k]=X; sPos[3*k+1]=d*H; sPos[3*k+2]=toZ(YS[j]);
+      rampColor(t,tmpC); sCol[3*k]=tmpC.r; sCol[3*k+1]=tmpC.g; sCol[3*k+2]=tmpC.b; sDen[k]=t;
+    }
+  }
+  surfGeo.attributes.position.needsUpdate=true; surfGeo.attributes.color.needsUpdate=true; surfGeo.attributes.dens.needsUpdate=true;
+  surfGeo.computeVertexNormals(); surfGeo.computeBoundingSphere();
+  // floor band + mean
+  const pts=[];
+  for(let i=0;i<NX;i++){
+    const X=toX(XS[i]);
+    bPos[6*i]=X; bPos[6*i+1]=0.012; bPos[6*i+2]=toZ(clamp(mu[i]+Z95*sd[i],YMIN,YMAX));
+    bPos[6*i+3]=X; bPos[6*i+4]=0.012; bPos[6*i+5]=toZ(clamp(mu[i]-Z95*sd[i],YMIN,YMAX));
+    pts.push(new THREE.Vector3(X,0.025,toZ(clamp(mu[i],YMIN-0.5,YMAX+0.5))));
+  }
+  bandGeo.attributes.position.needsUpdate=true; bandGeo.computeBoundingSphere();
+  if(meanTube){ scene.remove(meanTube); meanTube.geometry.dispose(); }
+  meanTube=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),NX,0.028,6,false),meanMat); scene.add(meanTube);
+  // points
+  while(ptGroup.children.length>state.points.length) ptGroup.remove(ptGroup.children[ptGroup.children.length-1]);
+  while(ptGroup.children.length<state.points.length) ptGroup.add(new THREE.Mesh(ptGeo,ptMat));
+  state.points.forEach((p,i)=>ptGroup.children[i].position.set(toX(p.x),0.1,toZ(p.y)));
+  updateSlice();
+}
+function updateSlice(){
+  const H=state.hscale, X=toX(state.xstar), m=model.muStar, s=Math.max(model.sdStar,SDFLOOR);
+  const pts=[]; let peak=0;
+  for(let j=0;j<NY;j++){
+    const d=pdf(YS[j],m,s), h=d*H, Zc=toZ(YS[j]), t=1-Math.exp(-1.5*d); peak=Math.max(peak,h);
+    slPos[6*j]=X; slPos[6*j+1]=0; slPos[6*j+2]=Zc; slPos[6*j+3]=X; slPos[6*j+4]=h; slPos[6*j+5]=Zc;
+    tmpC.copy(SL_LO).lerp(SL_HI,t*0.55); slCol[6*j]=tmpC.r; slCol[6*j+1]=tmpC.g; slCol[6*j+2]=tmpC.b;
+    tmpC.copy(SL_LO).lerp(SL_HI,0.35+0.65*t); slCol[6*j+3]=tmpC.r; slCol[6*j+4]=tmpC.g; slCol[6*j+5]=tmpC.b;
+    pts.push(new THREE.Vector3(X,h,Zc));
+  }
+  sliceGeo.attributes.position.needsUpdate=true; sliceGeo.attributes.color.needsUpdate=true; sliceGeo.computeBoundingSphere();
+  if(curveTube){ scene.remove(curveTube); curveTube.geometry.dispose(); scene.remove(glowTube); glowTube.geometry.dispose(); }
+  const curve=new THREE.CatmullRomCurve3(pts);
+  curveTube=new THREE.Mesh(new THREE.TubeGeometry(curve,NY*2,0.04,8,false),curveMat); scene.add(curveTube);
+  glowTube=new THREE.Mesh(new THREE.TubeGeometry(curve,NY*2,0.11,8,false),glowMat); glowTube.renderOrder=12; scene.add(glowTube);
+  xMarker.position.x=X;
+  const mp=muGeo.attributes.position.array; const zc=toZ(clamp(m,YMIN,YMAX));
+  mp[0]=X; mp[1]=0; mp[2]=zc; mp[3]=X; mp[4]=pdf(m,m,s)*H; mp[5]=zc; muGeo.attributes.position.needsUpdate=true; muGeo.computeBoundingSphere();
+}
+
+// orbit camera (custom, no external controls)
+const orbit={theta:-0.55,phi:1.02,r:15,target:new THREE.Vector3(0,0.5,0)};
+const ORBIT0={...orbit,target:orbit.target.clone()};
+const pointers=new Map(); let lastPinch=0;
+glc.addEventListener('pointerdown',e=>{ glc.setPointerCapture(e.pointerId); pointers.set(e.pointerId,{x:e.clientX,y:e.clientY}); if(pointers.size===2) lastPinch=pinchDist(); });
+glc.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)) return;
+  const p=pointers.get(e.pointerId), dx=e.clientX-p.x, dy=e.clientY-p.y; p.x=e.clientX; p.y=e.clientY;
+  if(pointers.size===1){ orbit.theta-=dx*0.006; orbit.phi=clamp(orbit.phi-dy*0.006,0.12,1.52); }
+  else if(pointers.size===2){ const d=pinchDist(); if(lastPinch>0) orbit.r=clamp(orbit.r*lastPinch/d,6,45); lastPinch=d; }
+});
+const release=e=>{ pointers.delete(e.pointerId); };
+glc.addEventListener('pointerup',release); glc.addEventListener('pointercancel',release);
+glc.addEventListener('wheel',e=>{ e.preventDefault(); orbit.r=clamp(orbit.r*Math.exp(e.deltaY*0.0012),6,45); },{passive:false});
+function pinchDist(){ const a=[...pointers.values()]; return Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y); }
+$('resetView').addEventListener('click',()=>{ orbit.theta=ORBIT0.theta; orbit.phi=ORBIT0.phi; orbit.r=ORBIT0.r; });
+function resize3D(){
+  const r=glc.parentElement.getBoundingClientRect(); if(!r.width||!r.height) return;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2)); renderer.setSize(r.width,r.height,false);
+  camera.aspect=r.width/r.height; camera.updateProjectionMatrix();
+}
+function frame(){
+  if(state.spin) orbit.theta+=0.0025;
+  const {theta,phi,r,target}=orbit;
+  camera.position.set(target.x+r*Math.sin(phi)*Math.sin(theta), target.y+r*Math.cos(phi), target.z+r*Math.sin(phi)*Math.cos(theta));
+  camera.lookAt(target);
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Controls ---------- */
+const kwrap=$('kernels');
+for(const [key,k] of Object.entries(KERNELS)){
+  const b=document.createElement('button'); b.type='button'; b.textContent=k.label; b.dataset.k=key; b.id='kernel-'+key;
+  b.addEventListener('click',()=>{
+    const wasStationary=!KERNELS[state.kernel].nonstationary;
+    state.kernel=key;
+    // Linear/polynomial kernels use ℓ as an input scale: a small ℓ makes the prior variance explode at the plot edges.
+    if(k.nonstationary&&wasStationary&&state.ell<3){ state.ell=5; syncSliders(); }
+    syncKernelUI(); recompute();
+  }); kwrap.appendChild(b);
+}
+function syncKernelUI(){
+  for(const b of kwrap.children) b.setAttribute('aria-pressed',String(b.dataset.k===state.kernel));
+  $('kformula').innerHTML=KERNELS[state.kernel].formula;
+  const per=state.kernel==='per'; $('periodLabel').hidden=!per; $('period').hidden=!per; $('periodVal').hidden=!per;
+}
+function syncSliders(){
+  $('ell').value=Math.log10(state.ell); $('ellVal').value=state.ell.toFixed(2);
+  $('sf').value=Math.log10(state.sf); $('sfVal').value=state.sf.toFixed(2);
+  $('sn').value=Math.sqrt(state.sn); const o=$('snVal'); o.value=state.sn>0?state.sn.toFixed(3):'noise-free'; o.classList.toggle('off',state.sn===0);
+  $('period').value=state.period; $('periodVal').value=state.period.toFixed(2);
+  $('xstar').value=state.xstar; $('xstarVal').value=state.xstar.toFixed(2);
+  $('showSamples').checked=state.showSamples; $('noisyPred').checked=state.noisyPred;
+  $('hscale').value=state.hscale; $('opacity').value=state.opacity; $('spin').checked=state.spin;
+  surfMat.uniforms.uOpacity.value=state.opacity;
+}
+$('ell').addEventListener('input',e=>{ state.ell=Math.pow(10,+e.target.value); $('ellVal').value=state.ell.toFixed(2); recompute(); });
+$('sf').addEventListener('input',e=>{ state.sf=Math.pow(10,+e.target.value); $('sfVal').value=state.sf.toFixed(2); recompute(); });
+$('sn').addEventListener('input',e=>{ const v=+e.target.value; state.sn=v*v; const o=$('snVal'); o.value=state.sn>0?state.sn.toFixed(3):'noise-free'; o.classList.toggle('off',state.sn===0); recompute(); });
+$('period').addEventListener('input',e=>{ state.period=+e.target.value; $('periodVal').value=state.period.toFixed(2); recompute(); });
+$('xstar').addEventListener('input',e=>{ state.xstar=+e.target.value; recomputeStar(); });
+$('showSamples').addEventListener('change',e=>{ state.showSamples=e.target.checked; recompute(); });
+$('noisyPred').addEventListener('change',e=>{ state.noisyPred=e.target.checked; recompute(); });
+$('hscale').addEventListener('input',e=>{ state.hscale=+e.target.value; draw2D(); update3D(); });
+$('opacity').addEventListener('input',e=>{ state.opacity=+e.target.value; surfMat.uniforms.uOpacity.value=state.opacity; });
+$('spin').addEventListener('change',e=>{ state.spin=e.target.checked; });
+$('resampleBtn').addEventListener('click',()=>{ Z=[0,1,2].map(()=>Float64Array.from({length:MS},randn)); state.showSamples=true; $('showSamples').checked=true; recompute(); });
+$('clearBtn').addEventListener('click',()=>{ state.points=[]; hoverIdx=-1; recompute(); });
+
+const GEN={
+  smooth:{n:10,f:x=>1.6*Math.sin(0.9*x)+0.4*Math.cos(2.3*x)},
+  step:{n:12,f:x=>x<5?-1.2:1.2},
+  bump:{n:9,f:x=>2.2*Math.exp(-((x-5)**2)/0.8)-0.5},
+  periodic:{n:14,f:x=>1.5*Math.sin(Math.PI*x)},
+  linear:{n:8,f:x=>0.4*(x-5)},
+  sparse:{n:8,f:x=>1.2*Math.sin(1.3*x), xs:()=>[1,1.4,1.9,2.4,7.2,7.6,8.1,8.7].map(v=>v+(Math.random()-0.5)*0.3)},
+};
+$('preset').addEventListener('change',e=>{
+  const g=GEN[e.target.value]; e.target.value=''; if(!g) return;
+  const xs=g.xs? g.xs() : Array.from({length:g.n},()=>0.4+Math.random()*9.2);
+  const noise=Math.max(state.sn,0.12);
+  state.points=xs.sort((a,b)=>a-b).map(x=>({x,y:clamp(g.f(x)+noise*randn(),YMIN,YMAX)}));
+  recompute();
+});
+
+$('fitBtn').addEventListener('click',()=>{
+  if(!state.points.length) return;
+  const btn=$('fitBtn'); btn.disabled=true; const old=btn.innerHTML; btn.textContent='Fitting…';
+  setTimeout(()=>{
+    const pts=state.points, base=hpNow();
+    const score=(le,lf,sn)=>{ const gp=fitGP(pts,{...base,ell:Math.pow(10,le),sf:Math.pow(10,lf),sn}); return gp&&isFinite(gp.lml)?gp.lml:-Infinity; };
+    let best={v:-Infinity};
+    for(const le of linspace(-1.3,1,24)) for(const lf of linspace(-0.6,0.5,8)) for(const sn of [0,0.02,0.05,0.1,0.15,0.2,0.3,0.45,0.7,1.0]){
+      const v=score(le,lf,sn); if(v>best.v) best={v,le,lf,sn};
+    }
+    let cur=best, st={le:0.05,lf:0.05,sn:0.03};
+    for(let round=0;round<5;round++){
+      for(const key of ['le','lf','sn']) for(const dir of [1,-1]){
+        const c={...cur}; c[key]+=dir*st[key];
+        c.le=clamp(c.le,-1.3,1); c.lf=clamp(c.lf,-0.7,0.5); c.sn=clamp(c.sn,0,1);
+        c.v=score(c.le,c.lf,c.sn); if(c.v>cur.v) cur=c;
+      }
+      st={le:st.le/2,lf:st.lf/2,sn:st.sn/2};
+    }
+    state.ell=Math.pow(10,cur.le); state.sf=Math.pow(10,cur.lf); state.sn=cur.sn;
+    syncSliders(); recompute();
+    btn.disabled=false; btn.innerHTML=old;
+  },20);
+});
+
+/* ---------- Boot ---------- */
+function seedPoints(){
+  const f=GEN.smooth.f, xs=[0.8,1.7,2.9,4.2,5.1,6.4,7.8,9.1], e=[0.08,-0.12,0.05,0.1,-0.06,0.09,-0.1,0.04];
+  return xs.map((x,i)=>({x,y:f(x)+e[i]}));
+}
+function start(saved){
+  try{ if(saved&&Array.isArray(saved.points)) Object.assign(state,saved); }catch(_){}
+  if(!saved||!Array.isArray(saved.points)) state.points=seedPoints();
+  syncKernelUI(); syncSliders();
+  new ResizeObserver(()=>{ resize2D(); }).observe(plot.parentElement);
+  new ResizeObserver(()=>{ resize3D(); }).observe(glc.parentElement);
+  resize2D(); resize3D(); recompute(); frame();
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>draw2D());
+  try{ window.claude?.hot?.snapshot?.(()=>({...state, points:state.points.map(p=>({x:p.x,y:p.y}))})); }catch(_){}
+}
+try{
+  if(window.claude?.hot?.ready) window.claude.hot.ready(start); else start(window.claude?.hot?.data ?? null);
+}catch(_){ start(null); }
+})();
+</script>
